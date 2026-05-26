@@ -285,7 +285,7 @@ class CoraDataset(BaseDataset):
 
         pid_filename = {}
         for line in lines:
-            parts = line.strip().split("\\t")
+            parts = line.strip().split("\t")
             if len(parts) >= 2:
                 numeric_id = parts[0]
                 url_str = parts[1].strip()
