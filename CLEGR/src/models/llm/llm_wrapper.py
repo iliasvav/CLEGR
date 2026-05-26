@@ -44,12 +44,31 @@ class LLM(torch.nn.Module):
 
         self.model_name = model_name
 
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
+        from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
         kwargs = dict(revision='main')
+        config = AutoConfig.from_pretrained(model_name)
+        if not hasattr(config, 'pad_token_id') or config.pad_token_id is None:
+            config.pad_token_id = config.eos_token_id
+        q_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type='nf4',
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+        kwargs["quantization_config"] = q_config
+        kwargs.pop("config", None)
+        kwargs["config"] = config
+
+        print(f"4-bit loading enabled for {model_name}")
+
+        self.llm = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            **kwargs,
+        )
+
+        """kwargs = dict(revision='main')
         kwargs['low_cpu_mem_usage'] = True
         kwargs['device_map'] = f"cuda:{torch.cuda.current_device()}"
-        kwargs['torch_dtype'] = dtype
+        kwargs['torch_dtype'] = dtype"""
         
         self.dtype = dtype
 
@@ -60,7 +79,7 @@ class LLM(torch.nn.Module):
         )
         self.tokenizer.pad_token_id = PAD_TOKEN_ID
         self.tokenizer.padding_side = PADDING_SIDE
-        self.llm = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
+        #self.llm = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
         self.word_embedding = self.llm.model.get_input_embeddings()
 
         self.device = self.llm.device

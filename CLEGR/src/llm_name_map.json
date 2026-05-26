@@ -1,4 +1,5 @@
 {
+    "phi-1.5": "microsoft/phi-1_5",
     "phi-3.5": "microsoft/Phi-3.5-mini-instruct",
     "phi-4": "microsoft/phi-4",
     "llama-3-8b": "meta-llama/Meta-Llama-3-8B-Instruct"

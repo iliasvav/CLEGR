@@ -1,4 +1,4 @@
-import argparse
+"""import argparse
 
 def get_args():
     parser = argparse.ArgumentParser(description="Generate CLEGR Graph Question Answering Dataset in PyTorch Geometric Format")
@@ -49,3 +49,9 @@ def get_args():
         parser.error("Cannot specify both --medium and --small graph sizes.")
 
     return args
+    """
+class MockArgs:
+    seed = 42
+
+def get_args():
+    return MockArgs()

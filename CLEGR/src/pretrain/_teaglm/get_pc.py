@@ -1,10 +1,11 @@
 import os
 import torch
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoConfig
 import numpy as np
 from sklearn.decomposition import PCA
 
 llm_to_ncomp = {
+    "phi-1.5": 512,
     "gpt2": 400,
     "Meta-Llama-3-8B-Instruct": 1000,
     "Phi-3.5-mini-instruct": 1000,
@@ -30,11 +31,22 @@ def get_pc(
     # create path
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
-    llm = AutoModelForCausalLM.from_pretrained(llm_name, device_map="cpu")
+    #phi1.5 sometimes lacks pad_token_id so use eos_token_id as pad_token_id in that case
+    config = AutoConfig.from_pretrained(llm_name)
+    if not hasattr(config, 'pad_token_id') or config.pad_token_id is None:
+        config.pad_token_id = config.eos_token_id
+    llm = AutoModelForCausalLM.from_pretrained(
+        llm_name, 
+        config=config, 
+        device_map="cpu"
+    )
+
+    #llm = AutoModelForCausalLM.from_pretrained(llm_name, device_map="cpu")
 
     llm_embeds = llm.get_input_embeddings().weight.data
 
-    numpy_matrix = llm_embeds.numpy()
+    #numpy_matrix = llm_embeds.numpy()
+    numpy_matrix = llm_embeds.to(torch.float32).numpy()
 
     pca = PCA(n_components=n_components)
     pca.fit(numpy_matrix)

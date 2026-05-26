@@ -2,6 +2,7 @@ import torch
 from absl import logging
 from src.modifiers import Modifier
 from src.models.llm.llm_wrapper import LLM
+import bitsandbytes as bnb
 
 
 class BaseGLM(torch.nn.Module):
@@ -40,9 +41,33 @@ class BaseGLM(torch.nn.Module):
             from peft import (
                 LoraConfig,
                 get_peft_model,
-                prepare_model_for_kbit_training,
+                #prepare_model_for_kbit_training,
             )
 
+            target_modules = set()
+            for name, module in self.llm_generator.named_modules():
+                if isinstance(module, (torch.nn.Linear, bnb.nn.Linear4bit, bnb.nn.Linear8bitLt)):
+                    target_modules.add(name.split(".")[-1])
+            valid_attention_candidates = [
+                "q_proj", "v_proj", "k_proj", "o_proj", 
+                "qkv_proj", "out_proj", "Wqkv", "ids_shard"
+            ]
+            final_targets = [t for t in target_modules if t in valid_attention_candidates]
+            if len(final_targets) == 0:
+                final_targets = ["q_proj", "v_proj"]  
+            print(f"LoRA targets: {final_targets}")
+            if hasattr(self.llm_generator, "gradient_checkpointing_enable"):
+                self.llm_generator.gradient_checkpointing_enable()
+            config = LoraConfig(
+                r=8,
+                lora_alpha=16,
+                lora_dropout=0.05,
+                target_modules=final_targets,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            self.llm_generator = get_peft_model(self.llm_generator, config)
+            """
             self.llm_generator = prepare_model_for_kbit_training(self.llm_generator)
             lora_r: int = 8
             lora_alpha: int = 16
@@ -56,7 +81,7 @@ class BaseGLM(torch.nn.Module):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            self.llm_generator = get_peft_model(self.llm_generator, config)
+            self.llm_generator = get_peft_model(self.llm_generator, config)"""
 
     def __repr__(self):
         return (
