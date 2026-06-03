@@ -250,7 +250,7 @@ class CoraDataset(BaseDataset):
         graph: Dataset | BaseData = dataset[0]
 
         path = os.path.join(self.root, "cora_raw", "cora.content")
-        df_tmp = pd.read_csv(path, sep='\\t', header=None, dtype=str)
+        df_tmp = pd.read_csv(path, sep='\t', header=None, dtype=str)
         idx_features_labels = df_tmp.values
         original_ids = idx_features_labels[:, 0]
 
