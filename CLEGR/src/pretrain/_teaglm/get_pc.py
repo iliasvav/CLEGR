@@ -9,7 +9,8 @@ llm_to_ncomp = {
     "gpt2": 400,
     "Meta-Llama-3-8B-Instruct": 1000,
     "Phi-3.5-mini-instruct": 1000,
-    "phi-4": 1000
+    "phi-4": 1000,
+    "Qwen2.5-3B-Instruct": 1000
 }
 
 def get_pc(
