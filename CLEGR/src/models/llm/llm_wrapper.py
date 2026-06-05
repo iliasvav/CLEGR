@@ -1,4 +1,5 @@
 import warnings
+import os
 from contextlib import nullcontext
 from typing import Any, Dict, List, Optional
 
@@ -12,13 +13,13 @@ try:
 except ImportError:
     BatchEncoding = Dict
 
-BOS = '<s>[INST]'
-EOS_USER = '[/INST]'
-EOS = '[/s]'
+#BOS = '<s>[INST]'
+#EOS_USER = '[/INST]'
+#EOS = '[/s]'
 IGNORE_INDEX = -100
 MAX_TXT_LEN = 16384
 MAX_NEW_TOKENS = 32
-PAD_TOKEN_ID = 0
+#PAD_TOKEN_ID = 0
 PADDING_SIDE = 'left'
 
 
@@ -77,7 +78,12 @@ class LLM(torch.nn.Module):
             model_name,
             use_fast=False,
         )
-        self.tokenizer.pad_token_id = PAD_TOKEN_ID
+        #self.tokenizer.pad_token_id = PAD_TOKEN_ID
+        if self.tokenizer.pad_token_id is None:
+            if self.tokenizer.eos_token_id is not None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            else:
+                self.tokenizer.pad_token_id = 0
         self.tokenizer.padding_side = PADDING_SIDE
         #self.llm = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
         self.word_embedding = self.llm.model.get_input_embeddings()
@@ -85,7 +91,22 @@ class LLM(torch.nn.Module):
         self.device = self.llm.device
         self.autocast_context = torch.amp.autocast(device_type="cuda", dtype=dtype)
 
+        if self.tokenizer.chat_template is not None:
+            self.is_chat_model = True
+        else:
+            self.is_chat_model = False
+
     def _encode_inputs(
+        self,
+        question: List[str],
+        context: Optional[List[str]] = None,
+    ) -> tuple:
+        batch_size = len(question)
+        pad_token = torch.tensor(self.tokenizer.pad_token_id, device=self.device)
+        pad_embeds = self.word_embedding(pad_token).unsqueeze(0)
+        return batch_size, pad_embeds
+
+    """def _encode_inputs(
         self,
         question: List[str],
         context: Optional[List[str]] = None,
@@ -106,19 +127,19 @@ class LLM(torch.nn.Module):
                                  device=self.device)
         pad_embeds = self.word_embedding(pad_token).unsqueeze(0)
         return (batch_size, questions, context, eos_user_tokens, bos_embeds,
-                pad_embeds)
+                pad_embeds)"""
 
     def _label_input_ids(
         self,
         i: int,
         label: BatchEncoding,
-        eos_tokens: BatchEncoding,
+        eos_tokens: List[int],
     ) -> List[int]:
         label_input_ids = label.input_ids[i][:MAX_NEW_TOKENS]
-        label_input_ids = label_input_ids + eos_tokens.input_ids
+        label_input_ids = label_input_ids + eos_tokens
         return label_input_ids
 
-    def _input_ids(
+    """def _input_ids(
         self,
         i: int,
         context: BatchEncoding,
@@ -130,19 +151,30 @@ class LLM(torch.nn.Module):
             input_ids += context.input_ids[i][:MAX_TXT_LEN]
         input_ids += question.input_ids[i]
         input_ids += eos_user_tokens.input_ids
+        return input_ids"""
+
+    def _input_ids(self, i:int, raw_context_batch: Optional[List[str]], raw_question_batch: List[str]) -> List[int]:
+        ctx_str = raw_context_batch[i][:MAX_TXT_LEN] if raw_context_batch is not None else ""
+        qst_str = raw_question_batch[i]
+        if self.is_chat_model:
+            messages = [{'role': 'user', 'content': f"Context: {ctx_str}\nQuestion: {qst_str}"}]
+            input_ids = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+        else:
+            full_prompt_str = f"<s>[INST] {ctx_str} {qst_str} [/INST]"
+            input_ids = self.tokenizer(full_prompt_str, add_special_tokens=False).input_ids
         return input_ids
 
     def _inputs_embeds(
         self,
         i: int,
         input_ids: List[int],
-        bos_embeds: Tensor,
         embedding: Optional[List[Tensor]] = None,
     ) -> Tensor:
         inputs_embeds = self.word_embedding(
             torch.tensor(input_ids, device=self.device))
 
-        to_cat = [bos_embeds]
+        #to_cat = [bos_embeds]
+        to_cat = []
         if embedding is not None and embedding[i] is not None:
             to_cat.append(embedding[i])
         to_cat.append(inputs_embeds)
@@ -200,31 +232,36 @@ class LLM(torch.nn.Module):
         answer: Optional[List[str]] = None,
         modifier: Optional[Modifier] = None,
     ) -> tuple:
-        (batch_size, question, context, eos_user_tokens, bos_embeds,
-         pad_embeds) = self._encode_inputs(question, context)
+        raw_question = question
+        raw_context = context
+        batch_size, pad_embeds = self._encode_inputs(question, context)
         
         # Apply the modifier
         if modifier is not None:
-            question, context, embedding = modifier(question, context, embedding, self.tokenizer)
+            dummy_q = self.tokenizer(raw_question, add_special_tokens=False)
+            dummy_c = self.tokenizer(raw_context if raw_context else "", add_special_tokens=False) if raw_context is not None else None
+            _, _, embedding = modifier(dummy_q, dummy_c, embedding, self.tokenizer)
         
         batch_label_input_ids = None
         if answer is not None:
             label = self.tokenizer(answer, add_special_tokens=False)
-            eos_tokens = self.tokenizer(EOS, add_special_tokens=False)
+            if not self.is_chat_model:
+                eos_tokens = self.tokenizer("[/s]", add_special_tokens=False).input_ids
+            else:
+                eos_tokens = [self.tokenizer.eos_token_id] if self.tokenizer.eos_token_id is not None else []
             batch_label_input_ids = []
 
         batch_inputs_embeds = []
         batch_attention_mask = []
         for i in range(batch_size):
-            input_ids = self._input_ids(i, context, question, eos_user_tokens)
+            input_ids = self._input_ids(i, raw_context, raw_question)
             if answer is not None:
                 label_input_ids = self._label_input_ids(i, label, eos_tokens)
                 input_ids += label_input_ids
             else:
                 label_input_ids = None
 
-            inputs_embeds = self._inputs_embeds(i, input_ids, bos_embeds,
-                                                embedding)
+            inputs_embeds = self._inputs_embeds(i, input_ids, embedding)
 
             (
                 batch_inputs_embeds,
@@ -300,15 +337,17 @@ class LLM(torch.nn.Module):
         inputs_embeds, attention_mask, _ = self._get_embeds(
             question, context, embedding)
 
-        bos_token = self.tokenizer(
+        """bos_token = self.tokenizer(
             BOS,
             add_special_tokens=False,
-        ).input_ids[0]
+        ).input_ids[0]"""
+
+        bos_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.eos_token_id
 
         with self.autocast_context:
             outputs = self.llm.generate(
                 inputs_embeds=inputs_embeds,
-                bos_token_id=bos_token,
+                bos_token_id=bos_token_id,
                 max_new_tokens=max_tokens,
                 attention_mask=attention_mask,
                 use_cache=True,
