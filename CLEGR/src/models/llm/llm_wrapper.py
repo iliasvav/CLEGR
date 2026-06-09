@@ -98,8 +98,8 @@ class LLM(torch.nn.Module):
 
     def _encode_inputs(
         self,
-        question: List[str],
-        context: Optional[List[str]] = None,
+        question: Any,
+        context: Optional[Any] = None,
     ) -> tuple:
         batch_size = len(question)
         pad_token = torch.tensor(self.tokenizer.pad_token_id, device=self.device)
@@ -132,11 +132,16 @@ class LLM(torch.nn.Module):
     def _label_input_ids(
         self,
         i: int,
-        label: BatchEncoding,
+        label: Any,
         eos_tokens: List[int],
     ) -> List[int]:
-        if hasattr(label, "input_ids") and i < len(label.input_ids):
-            label_input_ids = label.input_ids[i][:MAX_NEW_TOKENS]
+        ids_container = None
+        if hasattr(label, "input_ids"):
+            ids_container = label.input_ids
+        elif isinstance(label, dict) and "input_ids" in label:
+            ids_container = label["input_ids"]
+        if ids_container is not None and i < len(ids_container):
+            label_input_ids = ids_container[i][:MAX_NEW_TOKENS]
         else:
             label_input_ids = []
         label_input_ids = [int(tok) for tok in label_input_ids if str(tok).isdigit()]
@@ -229,14 +234,21 @@ class LLM(torch.nn.Module):
 
     def _get_embeds(
         self,
-        question: List[str],
-        context: Optional[List[str]] = None,
+        question: Any,
+        context: Optional[Any] = None,
         embedding: Optional[List[Tensor]] = None,
-        answer: Optional[List[str]] = None,
+        answer: Optional[Any] = None,
         modifier: Optional[Modifier] = None,
     ) -> tuple:
-        raw_question = question
-        raw_context = context
+        if hasattr(question, "input_ids") or isinstance(question, dict):
+            raw_question = self.tokenizer.batch_decode(question["input_ids"], skip_special_tokens=True)
+        else:
+            raw_question = question
+
+        if context is not None and (hasattr(context, "input_ids") or isinstance(context, dict)):
+            raw_context = self.tokenizer.batch_decode(context["input_ids"], skip_special_tokens=True)
+        else:
+            raw_context = context
         batch_size, pad_embeds = self._encode_inputs(question, context)
         
         # Apply the modifier
@@ -252,7 +264,7 @@ class LLM(torch.nn.Module):
                 eos_tokens = self.tokenizer("[/s]", add_special_tokens=False).input_ids
             else:
                 eos_tokens = [self.tokenizer.eos_token_id] if self.tokenizer.eos_token_id is not None else []
-            batch_label_input_ids = []
+        batch_label_input_ids = []
 
         batch_inputs_embeds = []
         batch_attention_mask = []
@@ -286,9 +298,9 @@ class LLM(torch.nn.Module):
 
     def forward(
         self,
-        question: List[str],
-        answer: List[str],
-        context: Optional[List[str]] = None,
+        question: Any,
+        answer: Any,
+        context: Optional[Any] = None,
         embedding: Optional[List[Tensor]] = None,
     ) -> Tensor:
         r"""The forward pass.
@@ -318,10 +330,11 @@ class LLM(torch.nn.Module):
     @torch.no_grad()
     def inference(
         self,
-        question: List[str],
-        context: Optional[List[str]] = None,
+        question: Any,
+        context: Optional[Any] = None,
         embedding: Optional[List[Tensor]] = None,
         max_tokens: Optional[int] = MAX_NEW_TOKENS,
+        modifier: Optional[Modifier] = None,
     ) -> List[str]:
         r"""The inference pass.
 
@@ -338,7 +351,7 @@ class LLM(torch.nn.Module):
                 generate. (default: :obj:`32`)
         """
         inputs_embeds, attention_mask, _ = self._get_embeds(
-            question, context, embedding)
+            question, context, embedding, modifier=modifier)
 
         """bos_token = self.tokenizer(
             BOS,
