@@ -135,9 +135,12 @@ class LLM(torch.nn.Module):
         label: BatchEncoding,
         eos_tokens: List[int],
     ) -> List[int]:
-        label_input_ids = label.input_ids[i][:MAX_NEW_TOKENS]
-        label_input_ids = label_input_ids + eos_tokens
-        return label_input_ids
+        if hasattr(label, "input_ids") and i < len(label.input_ids):
+            label_input_ids = label.input_ids[i][:MAX_NEW_TOKENS]
+        else:
+            label_input_ids = []
+        label_input_ids = [int(tok) for tok in label_input_ids if str(tok).isdigit()]
+        return label_input_ids + eos_tokens
 
     """def _input_ids(
         self,
