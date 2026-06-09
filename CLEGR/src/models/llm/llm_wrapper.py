@@ -257,7 +257,7 @@ class LLM(torch.nn.Module):
             input_ids = self._input_ids(i, raw_context, raw_question)
             if answer is not None:
                 label_input_ids = self._label_input_ids(i, label, eos_tokens)
-                input_ids += label_input_ids
+                input_ids = list(input_ids) + list(label_input_ids)
             else:
                 label_input_ids = None
 
