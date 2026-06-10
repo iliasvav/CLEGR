@@ -195,7 +195,7 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
     adapter_file = os.path.join(adapter_dir, "adapter_model.safetensors")
 
     if os.path.exists(adapter_file) and use_lora:
-        from safetensors import load_file
+        from safetensors.torch import load_file
         logging.info(f"Targeting LoRA adapter weights directly from: {adapter_file}")
         raw_weights = load_file(adapter_file, device="cpu")
         clean_state_dict = {}
