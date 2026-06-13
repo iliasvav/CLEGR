@@ -191,27 +191,6 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
     )
     logging.info("Model initialized successfully.")
 
-    adapter_dir = f"{FLAGS.save_dir}/{FLAGS.method}/lora_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}"
-    adapter_file = os.path.join(adapter_dir, "adapter_model.safetensors")
-
-    if os.path.exists(adapter_file) and use_lora:
-        from safetensors.torch import load_file
-        logging.info(f"Targeting LoRA adapter weights directly from: {adapter_file}")
-        raw_weights = load_file(adapter_file, device="cpu")
-        clean_state_dict = {}
-        for k, v in raw_weights.items():
-            if k.startswith("base_model.model.") and not k.startswith("base_model.model.base_model.model."):
-                clean_key = k.replace("base_model.model.", "base_model.model.base_model.model.")
-            else:
-                clean_key = k
-            clean_state_dict[clean_key] = v.to(glm.llm.device)
-            
-        try:
-            glm.llm.load_state_dict(clean_state_dict, strict=False)
-            logging.info("LoRA adapter weights successfully matched and mapped into LLM engine.")
-        except Exception as e:
-            logging.warning(f"Forced key remap bypassed. Fallback loader executing: {e}")
-
     # print all parameters that are being trained
     print("Parameters being trained:")
     for name, param in model.named_parameters():
