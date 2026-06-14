@@ -171,13 +171,13 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
     )
 
     # Freeze LLM parameters.
-    for name, param in glm.llm.named_parameters():
+    """for name, param in glm.llm.named_parameters():
         if "lora_" in name:
             param.requires_grad = True 
         else:
-            param.requires_grad = False
-    #for param in glm.llm.parameters():
-        #param.requires_grad = False
+            param.requires_grad = False"""
+    for param in glm.llm.parameters():
+        param.requires_grad = False
     if FLAGS.method not in ["g-retriever", "node-g-retriever", "llm-only", "soft-prompt"]:
         for param in glm.gnn.parameters():
             param.requires_grad = False

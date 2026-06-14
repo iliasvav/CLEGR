@@ -186,34 +186,6 @@ class TEA_GLM_LightningModule(pl.LightningModule):
             graph_data.to(self.model.llm.device) if graph_data is not None else None
         )
 
-    def on_load_checkpoint(self, checkpoint: dict) -> None:
-        state_dict = checkpoint.get("state_dict", {})
-        if not state_dict:
-            return
-            
-        print("Modular Interceptor: Aligning Checkpoint Keys...")
-        updated_state_dict = {}
-        
-        for k, v in state_dict.items():
-            new_key = k
-            
-            # Case 1: If keys were saved with PyTorch Lightning DDP tracking prefixes
-            if k.startswith("model.llm_generator.base_model.model."):
-                new_key = k.replace("model.llm_generator.base_model.model.", "model.llm.llm.")
-            
-            # Case 2: If keys were saved via flat PEFT modules
-            elif "model.llm_generator." in k and "lora_" in k:
-                new_key = k.replace("model.llm_generator.", "model.llm.llm.base_model.model.")
-                
-            # Case 3: Catch any generic top-level DDP "model." wrapping inconsistencies
-            elif k.startswith("model.model."):
-                new_key = k.replace("model.model.", "model.")
-                
-            updated_state_dict[new_key] = v
-            
-        checkpoint["state_dict"] = updated_state_dict
-        print("Modular Interceptor: Keys successfully mapped to architecture layout!")
-
     def forward(self, batch):
         return self.model(batch, self.graph_data)
 
@@ -251,4 +223,4 @@ class TEA_GLM_LightningModule(pl.LightningModule):
 
     def state_dict(self):
         # Don't save the llm//gnn, it is not being trained
-        return {k: v for k, v in super().state_dict().items() if "projector" in k or "lora_" in k}
+        return {k: v for k, v in super().state_dict().items() if "projector" in k}
