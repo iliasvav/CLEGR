@@ -6,6 +6,7 @@ from sklearn.decomposition import PCA
 
 llm_to_ncomp = {
     "phi-1.5": 512,
+    "phi-1_5": 512,
     "gpt2": 400,
     "Meta-Llama-3-8B-Instruct": 1000,
     "Phi-3.5-mini-instruct": 1000,
