@@ -45,10 +45,26 @@ class ArxivDataset(BaseDataset):
         raw_path = os.path.join(self.root, "arxiv_raw")
         assert os.path.exists(raw_path), f"Raw data not found at {raw_path}"
 
-        dataset = PygNodePropPredDataset(
+        _original_torch_load = torch.load
+        def torch_load_weights_false(*args, **kwargs):
+            if "weights_only" not in kwargs:
+                kwargs["weights_only"] = False
+            return _original_torch_load(*args, **kwargs)
+
+        torch.load = torch_load_weights_false
+
+        try:
+            dataset = PygNodePropPredDataset(
+                name="ogbn-arxiv",
+                root=self.root,
+            )
+        finally:
+            torch.load = _original_torch_load
+        
+        """dataset = PygNodePropPredDataset(
             name = "ogbn-arxiv",
             root=self.root
-        )
+        )"""
         split_idx = dataset.get_idx_split()
         train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
         graph = dataset[0]
