@@ -27,6 +27,8 @@ from src.utils import (
 # LoRA imports
 from peft import PeftModel
 
+from torch_geometric.utils import to_undirected
+
 # Define command-line flags
 FLAGS = flags.FLAGS
 
@@ -88,6 +90,27 @@ flags.DEFINE_enum(
     "wandb_mode", "online", ["online", "offline", "disabled"], "wandb mode."
 )
 
+#black box flags
+flags.DEFINE_float("edge_drop_prob", 0.0, "Probability of randomly dropping edges at inference time.")
+flags.DEFINE_integer("edge_drop_seed", 42, "Random seed for edge dropping.")
+
+def drop_edges_undirected(edge_index, drop_prob, seed=42):
+    if drop_prob <= 0:
+        return edge_index
+    assert 0.0 <= drop_prob <= 1.0
+    device = edge_index.device
+    edge_index_cpu = edge_index.cpu()
+    row,col = edge_index_cpu
+    src = torch.minimum(row,col)
+    dst = torch.maximum(row,col)
+    pairs = torch.stack([src, dst], dim=0)
+    unique_pairs = torch.unique(pairs, dim=1)
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    keep_mask = torch.rand(unique_pairs.size(1), generator=generator) > drop_prob
+    kept_pairs = unique_pairs[:, keep_mask]
+    new_edge_index = to_undirected(kept_pairs)
+    return new_edge_index.to(device)
 
 def train_with_lightning(
     model, train_loader, val_loader, epochs: int, wandb_logger: WandbLogger = None
@@ -217,6 +240,22 @@ def main(argv):
         )
     except Exception as e:
         logging.error("Error accessing data list items: %s", e)
+
+    if FLAGS.edge_drop_prob > 0 and hasattr(dataset, "graph_data"):
+        old_edges = dataset.graph_data.edge_index.size(1)
+        dataset.graph_data.edge_index = drop_edges_undirected(
+            dataset.graph_data.edge_index,
+            drop_prob=FLAGS.edge_drop_prob,
+            seed=FLAGS.edge_drop_seed,
+        )
+        new_edges = dataset.graph_data.edge_index.size(1)
+        logging.info(
+            "Applied inference-time edge drop: p=%s, seed=%s, edges %s -> %s",
+            FLAGS.edge_drop_prob,
+            FLAGS.edge_drop_seed,
+            old_edges,
+            new_edges,
+        )
 
     # Split and create loaders
     train_dataset, val_dataset, test_dataset = split_dataset(dataset, FLAGS.seed)
