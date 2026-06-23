@@ -94,6 +94,30 @@ flags.DEFINE_enum(
 flags.DEFINE_float("edge_drop_prob", 0.0, "Probability of randomly dropping edges at inference time.")
 flags.DEFINE_integer("edge_drop_seed", 42, "Random seed for edge dropping.")
 
+flags.DEFINE_string("node_feature_noise", "none", "Node feature perturbation: none, shuffle, gaussian, zero.")
+flags.DEFINE_float("node_feature_noise_std", 0.1, "Std for Gaussian node feature noise.")
+flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature perturbation.")
+
+def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
+    if mode == "none":
+        return x
+    assert mode in ["shuffle", "gaussian", "zero"]
+
+    device = x.device
+    x_cpu = x.cpu()
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    if mode == "shuffle":
+        perm = torch.randperm(x_cpu.size(0), generator=generator)
+        new_x = x_cpu[perm]
+    elif mode == "gaussian":
+        noise = torch.randn(x_cpu.shape, generator=generator) * noise_std
+        new_x = x_cpu + noise
+    elif mode == "zero":
+        new_x = torch.zeros_like(x_cpu)
+    return new_x.to(device)
+
 def drop_edges_undirected(edge_index, drop_prob, seed=42):
     if drop_prob <= 0:
         return edge_index
@@ -255,6 +279,19 @@ def main(argv):
             FLAGS.edge_drop_seed,
             old_edges,
             new_edges,
+        )
+    if FLAGS.node_feature_noise != "none" and hasattr(dataset, "graph_data"):
+        logging.info(
+            "Applying node feature perturbation: mode=%s, seed=%s, std=%s",
+            FLAGS.node_feature_noise,
+            FLAGS.node_feature_seed,
+            FLAGS.node_feature_noise_std,
+        )
+        dataset.graph_data.x = perturb_node_features(
+            dataset.graph_data.x,
+            mode=FLAGS.node_feature_noise,
+            seed=FLAGS.node_feature_seed,
+            noise_std=FLAGS.node_feature_noise_std,
         )
 
     # Split and create loaders
