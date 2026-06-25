@@ -10,6 +10,7 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     EarlyStopping,
     LearningRateMonitor,
+    Callback,
 )
 from lightning.pytorch.strategies import DDPStrategy
 
@@ -98,6 +99,9 @@ flags.DEFINE_string("node_feature_noise", "none", "Node feature perturbation: no
 flags.DEFINE_float("node_feature_noise_std", 0.1, "Std for Gaussian node feature noise.")
 flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature perturbation.")
 
+#report accuracy after each epoch
+flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation evaluation after each epoch.")
+
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
         return x
@@ -135,6 +139,45 @@ def drop_edges_undirected(edge_index, drop_prob, seed=42):
     kept_pairs = unique_pairs[:, keep_mask]
     new_edge_index = to_undirected(kept_pairs)
     return new_edge_index.to(device)
+class EvalEachEpochCallback(Callback):
+    def __init__(self, val_loader, dataset_name):
+        super().__init__()
+        self.val_loader = val_loader
+        self.dataset_name = dataset_name
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+
+        logging.info("Running validation accuracy evaluation after epoch %s", trainer.current_epoch)
+
+        evaluator = get_evaluator(self.dataset_name)
+
+        metrics = evaluate(
+            pl_module.model,
+            self.val_loader,
+            evaluator,
+            graph_data=pl_module.graph_data,
+        )
+
+        for key, value in metrics.items():
+            metric_name = f"epoch_val_{key}"
+
+            pl_module.log(
+                metric_name,
+                value,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+
+            logging.info(
+                "Epoch %s - %s: %s",
+                trainer.current_epoch,
+                metric_name,
+                value,
+            )
 
 def train_with_lightning(
     model, train_loader, val_loader, epochs: int, wandb_logger: WandbLogger = None
@@ -160,6 +203,9 @@ def train_with_lightning(
         raise FileExistsError(f"Checkpoint exists: {ckpt_path}")
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
+    callbacks = [checkpoint_callback, lr_monitor]
+    if FLAGS.eval_each_epoch:
+        callbacks.append(EvalEachEpochCallback(val_loader, FLAGS.dataset))
 
     # Trainer with gradient clipping
     trainer = pl.Trainer(
@@ -168,7 +214,7 @@ def train_with_lightning(
         accelerator=FLAGS.accelerator,
         devices=FLAGS.num_gpus,
         strategy=strategy,
-        callbacks=[checkpoint_callback, lr_monitor],
+        callbacks=callbacks,
         logger=wandb_logger,
         gradient_clip_val=FLAGS.gradient_clip_val,
         gradient_clip_algorithm="norm",
