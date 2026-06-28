@@ -101,6 +101,7 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 
 #report accuracy after each epoch
 flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation evaluation after each epoch.")
+flags.DEFINE_string("eval_split", "test", "Which split to evaluate: train, val, test.")
 
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
@@ -416,6 +417,8 @@ def main(argv):
                     lm_module.model.llm_generator, lora_dir
                 )
                 logging.info("Loaded LoRA adapters from %s", lora_dir)
+                logging.info("Loaded LoRA model class: %s", type(lm_module.model.llm_generator))
+                logging.info("Active PEFT adapters: %s", getattr(lm_module.model.llm_generator, "active_adapters", None))
             model = lm_module
         except Exception as e:
             if FLAGS.method == "llm-only":
@@ -426,8 +429,13 @@ def main(argv):
 
         # Evaluate
         evaluator = get_evaluator(FLAGS.dataset)
+        eval_loader = {
+            "train": train_loader,
+            "val": val_loader,
+            "test": test_loader,
+        }[FLAGS.eval_split]
         metrics = evaluate(
-            model.model, test_loader, evaluator, graph_data=dataset.graph_data
+            model.model, eval_loader, evaluator, graph_data=dataset.graph_data
         )
 
         # Log final metrics
