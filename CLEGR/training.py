@@ -29,6 +29,7 @@ from src.utils import (
 from peft import PeftModel
 
 from torch_geometric.utils import to_undirected
+from torch_geometric.loader import DataLoader
 
 # Define command-line flags
 FLAGS = flags.FLAGS
@@ -429,13 +430,22 @@ def main(argv):
 
         # Evaluate
         evaluator = get_evaluator(FLAGS.dataset)
-        eval_loader = {
-            "train": train_loader,
-            "val": val_loader,
-            "test": test_loader,
+        eval_dataset = {
+            "train": train_dataset,
+            "val": val_dataset,
+            "test": test_dataset,
         }[FLAGS.eval_split]
+        eval_loader = DataLoader(
+            eval_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=FLAGS.num_workers,
+        )
         metrics = evaluate(
-            model.model, eval_loader, evaluator, graph_data=dataset.graph_data
+            model.model,
+            eval_loader,
+            evaluator,
+            graph_data=dataset.graph_data,
         )
 
         # Log final metrics
