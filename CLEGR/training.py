@@ -189,14 +189,13 @@ class SaveLoRAEveryEpochCallback(Callback):
             method,
             f"lora_{llm_model_name}_{dataset}_seed_{seed}"
         )
-
     def on_train_epoch_end(self, trainer, pl_module):
+        if not trainer.is_global_zero:
+            return
         if not hasattr(pl_module.model, "llm_generator"):
             return
-
         if not hasattr(pl_module.model.llm_generator, "save_pretrained"):
             return
-
         pl_module.model.llm_generator.save_pretrained(self.lora_dir)
         logging.info("Saved LoRA adapters to %s", self.lora_dir)
 
@@ -383,7 +382,7 @@ def main(argv):
     model = initialize_model(
         FLAGS.lr,
         graph_data=dataset.graph_data,
-        use_lora=FLAGS.use_lora,
+        use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
     )
 
     # Train or evaluate
