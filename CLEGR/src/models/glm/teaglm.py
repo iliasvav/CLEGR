@@ -224,3 +224,17 @@ class TEA_GLM_LightningModule(pl.LightningModule):
     def state_dict(self):
         # Don't save the llm//gnn, it is not being trained
         return {k: v for k, v in super().state_dict().items() if "projector" in k}
+
+    """
+    def state_dict(self):
+    sd = super().state_dict()
+
+    return {
+        k: v
+        for k, v in sd.items()
+        if (
+            "projector" in k
+            or "lora_" in k
+        )
+    }
+    """

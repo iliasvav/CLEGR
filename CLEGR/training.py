@@ -179,6 +179,25 @@ class EvalEachEpochCallback(Callback):
                 value,
             )
 
+class SaveLoRAEveryEpochCallback(Callback):
+    def __init__(self, save_dir, method, llm_model_name, dataset, seed):
+        super().__init__()
+        self.lora_dir = os.path.join(
+            save_dir,
+            method,
+            f"lora_{llm_model_name}_{dataset}_seed_{seed}"
+        )
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if not hasattr(pl_module.model, "llm_generator"):
+            return
+
+        if not hasattr(pl_module.model.llm_generator, "save_pretrained"):
+            return
+
+        pl_module.model.llm_generator.save_pretrained(self.lora_dir)
+        logging.info("Saved LoRA adapters to %s", self.lora_dir)
+
 def train_with_lightning(
     model, train_loader, val_loader, epochs: int, wandb_logger: WandbLogger = None
 ):
@@ -206,6 +225,17 @@ def train_with_lightning(
     callbacks = [checkpoint_callback, lr_monitor]
     if FLAGS.eval_each_epoch:
         callbacks.append(EvalEachEpochCallback(val_loader, FLAGS.dataset))
+
+    if FLAGS.use_lora:
+        callbacks.append(
+            SaveLoRAEveryEpochCallback(
+                FLAGS.save_dir,
+                FLAGS.method,
+                FLAGS.llm_model_name,
+                FLAGS.dataset,
+                FLAGS.seed,
+            )
+        )
 
     # Trainer with gradient clipping
     trainer = pl.Trainer(
@@ -379,6 +409,9 @@ def main(argv):
                     FLAGS.method,
                     f"lora_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}"
                 )
+                if not os.path.exists(lora_dir):
+                    logging.error("LoRA directory does not exist: %s", lora_dir)
+                    return
                 lm_module.model.llm_generator = PeftModel.from_pretrained(
                     lm_module.model.llm_generator, lora_dir
                 )
