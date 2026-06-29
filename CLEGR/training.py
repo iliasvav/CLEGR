@@ -85,7 +85,7 @@ flags.DEFINE_float("scheduler_gamma", 0.1, "Decay factor for StepLR scheduler.")
 flags.DEFINE_float("gradient_clip_val", 1.0, "Value for gradient clipping.")
 
 # wandb-related flags
-flags.DEFINE_bool("use_wandb", True, "Enable Weights & Biases logging.")
+flags.DEFINE_bool("use_wandb", False, "Enable Weights & Biases logging.")
 flags.DEFINE_string("wandb_project", "training-glms", "wandb project name.")
 flags.DEFINE_string("wandb_entity", None, "wandb team or user name.")
 flags.DEFINE_enum(
@@ -103,6 +103,7 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 #report accuracy after each epoch
 flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation evaluation after each epoch.")
 flags.DEFINE_string("eval_split", "test", "Which split to evaluate: train, val, test.")
+flags.DEFINE_string("context_mode", "full", "Context ablation mode: full, no_title, no_abstract, empty.")
 
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
@@ -141,6 +142,27 @@ def drop_edges_undirected(edge_index, drop_prob, seed=42):
     kept_pairs = unique_pairs[:, keep_mask]
     new_edge_index = to_undirected(kept_pairs)
     return new_edge_index.to(device)
+
+def apply_context_mode(dataset, mode="full"):
+    if mode == "full":
+        return dataset
+    assert mode in ["no_title", "no_abstract", "empty"]
+
+    for i in range(len(dataset)):
+        data = dataset[i]
+        if not hasattr(data, "context"):
+            continue
+        if isinstance(data.context, dict):
+            if mode == "no_title":
+                data.context["Title"] = ""
+            elif mode == "no_abstract":
+                data.context["Abstract"] = ""
+            elif mode == "empty":
+                data.context = {"Title": "", "Abstract": ""}
+        elif isinstance(data.context, str):
+            if mode == "empty":
+                data.context = ""
+    return dataset
 class EvalEachEpochCallback(Callback):
     def __init__(self, val_loader, dataset_name):
         super().__init__()
@@ -328,6 +350,10 @@ def main(argv):
     except Exception as e:
         logging.error("Failed to load dataset: %s", e)
         return
+    
+    if FLAGS.context_mode != "full":
+        logging.info("Applying context ablation mode: %s", FLAGS.context_mode)
+        dataset = apply_context_mode(dataset, FLAGS.context_mode)
 
     logging.info("Dataset details: %s", dataset)
     try:
