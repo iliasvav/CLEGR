@@ -143,26 +143,6 @@ def drop_edges_undirected(edge_index, drop_prob, seed=42):
     new_edge_index = to_undirected(kept_pairs)
     return new_edge_index.to(device)
 
-def apply_context_mode(dataset, mode="full"):
-    if mode == "full":
-        return dataset
-    assert mode in ["no_title", "no_abstract", "empty"]
-
-    for i in range(len(dataset)):
-        data = dataset[i]
-        if not hasattr(data, "context"):
-            continue
-        if isinstance(data.context, dict):
-            if mode == "no_title":
-                data.context["Title"] = ""
-            elif mode == "no_abstract":
-                data.context["Abstract"] = ""
-            elif mode == "empty":
-                data.context = {"Title": "", "Abstract": ""}
-        elif isinstance(data.context, str):
-            if mode == "empty":
-                data.context = ""
-    return dataset
 class EvalEachEpochCallback(Callback):
     def __init__(self, val_loader, dataset_name):
         super().__init__()
@@ -350,10 +330,6 @@ def main(argv):
     except Exception as e:
         logging.error("Failed to load dataset: %s", e)
         return
-    
-    if FLAGS.context_mode != "full":
-        logging.info("Applying context ablation mode: %s", FLAGS.context_mode)
-        dataset = apply_context_mode(dataset, FLAGS.context_mode)
 
     logging.info("Dataset details: %s", dataset)
     try:
@@ -411,6 +387,8 @@ def main(argv):
         use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
     )
 
+    model.model.context_mode = FLAGS.context_mode
+
     # Train or evaluate
     if not FLAGS.evaluate and FLAGS.method != "llm-only":
         if FLAGS.use_lightning:
@@ -446,6 +424,7 @@ def main(argv):
                 logging.info("Loaded LoRA model class: %s", type(lm_module.model.llm_generator))
                 logging.info("Active PEFT adapters: %s", getattr(lm_module.model.llm_generator, "active_adapters", None))
             model = lm_module
+            model.model.context_mode = FLAGS.context_mode
         except Exception as e:
             if FLAGS.method == "llm-only":
                 logging.info("Loading LLM only model. No checkpoint found.")

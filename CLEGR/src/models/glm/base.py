@@ -91,7 +91,7 @@ class BaseGLM(torch.nn.Module):
             f")"
         )
 
-    def get_context(self, data):
+    """def get_context(self, data):
         context = data.context
         con = []
         for i in range(len(data.question)):
@@ -108,6 +108,43 @@ class BaseGLM(torch.nn.Module):
                     )
             con.append(tempcon)
             
+        return con"""
+    
+    def get_context(self, data):
+        context_mode = getattr(self, "context_mode", "full")
+        context = data.context
+        con = []
+        for i in range(len(data.question)):
+            tempcon = ""
+            if context is not None:
+                if context_mode == "empty":
+                    tempcon = ""
+                elif type(context) == dict:
+                    title = context.get("Title", [""] * len(data.question))
+                    abstract = context.get("Abstract", [""] * len(data.question))
+                    if context_mode == "full":
+                        tempcon = f"Title: {title[i]}\nAbstract: {abstract[i]}\n"
+                    elif context_mode == "no_title":
+                        tempcon = f"Abstract: {abstract[i]}\n"
+                    elif context_mode == "no_abstract":
+                        tempcon = f"Title: {title[i]}\n"
+                    else:
+                        raise ValueError(f"Unknown context_mode: {context_mode}")
+                elif type(context[i]) == str:
+                    if context_mode == "full":
+                        tempcon = context[i]
+                    elif context_mode == "empty":
+                        tempcon = ""
+                    else:
+                        tempcon = context[i]
+                else:
+                    raise TypeError(
+                        f"Unsupported context type: {type(context)}. Expected dict or list."
+                    )
+            con.append(tempcon)
+            if i == 0:
+                print("CONTEXT MODE:", context_mode)
+                print("CONTEXT GIVEN TO MODEL:", tempcon[:500])
         return con
 
     def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
