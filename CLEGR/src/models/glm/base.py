@@ -142,9 +142,6 @@ class BaseGLM(torch.nn.Module):
                         f"Unsupported context type: {type(context)}. Expected dict or list."
                     )
             con.append(tempcon)
-            if i == 0:
-                print("CONTEXT MODE:", context_mode)
-                print("CONTEXT GIVEN TO MODEL:", tempcon[:500])
         return con
 
     def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
