@@ -164,18 +164,27 @@ class EvalEachEpochCallback(Callback):
             graph_data=pl_module.graph_data,
         )
 
-        for key, value in metrics.items():
-            metric_name = f"epoch_val_{key}"
+        def flatten_metrics(metrics, prefix=""):
+            flat = {}
+            for key, value in metrics.items():
+                name = f"{prefix}_{key}" if prefix else key
+                if isinstance(value, dict):
+                    flat.update(flatten_metrics(value, name))
+                elif isinstance(value, (int, float)):
+                    flat[name] = value
+            return flat
 
+        flat_metrics = flatten_metrics(metrics)
+        for key, value in flat_metrics.items():
+            metric_name = f"epoch_val_{key}"
             pl_module.log(
                 metric_name,
-                value,
+                float(value),
                 on_step=False,
                 on_epoch=True,
-                prog_bar=True,
+                prog_bar=("overall_accuracy" in key or key == "accuracy"),
                 sync_dist=True,
             )
-
             logging.info(
                 "Epoch %s - %s: %s",
                 trainer.current_epoch,
