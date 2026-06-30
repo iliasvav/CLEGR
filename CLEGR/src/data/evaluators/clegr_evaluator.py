@@ -152,8 +152,9 @@ class CLEGREvaluator(DatasetEvaluator):
 
     def __call__(self, data_obj, llm_output):
         pred_raw = llm_output.strip() if llm_output else ""
-        print(data_obj)
+        #print(data_obj)
         gt_raw = str(data_obj.label[0]).strip() if data_obj.label and data_obj.label[0] else ""
+        self.add_raw(pred_raw, gt_raw)
         qtype = data_obj.question_type[0]
         scorer = self.scorers.get(qtype, self._exact_scorer)
         correct = scorer(pred_raw, gt_raw)
@@ -290,3 +291,29 @@ class CLEGREvaluator(DatasetEvaluator):
 
         return metrics
 
+    def log_raw(self):
+        import os
+        import csv
+        os.makedirs("logs", exist_ok=True)
+        with open("logs/output.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "Prediction",
+                "Ground Truth",
+                "Question Type",
+                "Group",
+                "Correct",
+                "Scope",
+                "Subgroups",
+            ])
+
+            for r in self.records:
+                writer.writerow([
+                    r["pred_raw"],
+                    r["gt_raw"],
+                    r["type"],
+                    r["group"],
+                    r["correct"],
+                    r["scope"],
+                    "|".join(r["subgroups"]),
+                ])
