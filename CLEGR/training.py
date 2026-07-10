@@ -497,12 +497,6 @@ def main(argv):
             shuffle=False,
             num_workers=FLAGS.num_workers,
         )
-        metrics = evaluate(
-            model.model,
-            eval_loader,
-            evaluator,
-            graph_data=dataset.graph_data,
-        )
         if FLAGS.eval_mode == "generation":
             metrics = evaluate(
                 model.model,
