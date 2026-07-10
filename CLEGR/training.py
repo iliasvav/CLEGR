@@ -105,6 +105,49 @@ flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation eval
 flags.DEFINE_string("eval_split", "test", "Which split to evaluate: train, val, test.")
 flags.DEFINE_string("context_mode", "full", "Context ablation mode: full, no_title, no_abstract, empty.")
 
+flags.DEFINE_enum("eval_mode", "generation", ["generation", "label_scoring"], "Evaluation mode.")
+
+def get_candidate_labels(dataset):
+    labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
+    logging.info("Found %d candidate labels: %s", len(labels), labels)
+    return labels
+
+def evaluate_label_scoring(
+    model: BaseGLM,
+    loader,
+    evaluator: DatasetEvaluator,
+    candidate_labels,
+    graph_data=None,
+):
+    model.eval()
+    graph_data = graph_data.to(model.llm.device) if graph_data else None
+    num_samples = (
+        min(len(loader.dataset), FLAGS.max_samples)
+        if FLAGS.max_samples > 0
+        else len(loader.dataset)
+    )
+    logging.info("Evaluating with label scoring on %d samples", num_samples)
+    with torch.no_grad():
+        for i, data in tqdm(enumerate(loader), desc="Label scoring", total=num_samples):
+            if i >= num_samples:
+                break
+            data = data.to(model.llm.device)
+            true_label = data.label
+            scores = {}
+            for candidate in candidate_labels:
+                data.label = [candidate]
+                loss = model(
+                    data,
+                    graph_data=graph_data,
+                )
+                scores[candidate] = float(loss.item())
+            data.label = true_label
+            best_label = min(scores, key=scores.get)
+            evaluator(data, best_label)
+    metrics = evaluator.compute_metrics()
+    evaluator.log_raw()
+    return metrics
+
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
         return x
@@ -460,6 +503,24 @@ def main(argv):
             evaluator,
             graph_data=dataset.graph_data,
         )
+        if FLAGS.eval_mode == "generation":
+            metrics = evaluate(
+                model.model,
+                eval_loader,
+                evaluator,
+                graph_data=dataset.graph_data,
+            )
+        elif FLAGS.eval_mode == "label_scoring":
+            candidate_labels = get_candidate_labels(dataset)
+            metrics = evaluate_label_scoring(
+                model.model,
+                eval_loader,
+                evaluator,
+                candidate_labels,
+                graph_data=dataset.graph_data,
+            )
+        else:
+            raise ValueError(f"Unknown eval_mode: {FLAGS.eval_mode}")
 
         # Log final metrics
         for key, value in metrics.items():
