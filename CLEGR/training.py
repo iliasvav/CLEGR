@@ -93,7 +93,9 @@ flags.DEFINE_enum(
 )
 
 #black box flags
-flags.DEFINE_float("edge_drop_prob", 0.0, "Probability of randomly dropping edges at inference time.")
+flags.DEFINE_string("edge_drop_mode", "none", ["random" "degree"], "Edge dropping strategy: random or degree-aware.")
+flags.DEFINE_float("edge_drop_prob", 0.0, "Fraction of undirected edges to drop.")
+flags.DEFINE_float("edge_drop_degree_power", 1.0, "Strength of degree bias for degree-aware edge dropping.")
 flags.DEFINE_integer("edge_drop_seed", 42, "Random seed for edge dropping.")
 
 flags.DEFINE_string("node_feature_noise", "none", "Node feature perturbation: none, shuffle, gaussian, zero.")
@@ -185,6 +187,65 @@ def drop_edges_undirected(edge_index, drop_prob, seed=42):
     kept_pairs = unique_pairs[:, keep_mask]
     new_edge_index = to_undirected(kept_pairs)
     return new_edge_index.to(device)
+
+def drop_edges_degree_aware(edge_index, drop_prob, seed=42, degree_power=1.0,):
+    if drop_prob <= 0:
+        return edge_index
+    assert 0.0 <= drop_prob <= 1.0
+    assert degree_power >= 0.0
+    device = edge_index.device
+    edge_index_cpu = edge_index.cpu()
+    row, col = edge_index_cpu
+    src = torch.minimum(row, col)
+    dst = torch.maximum(row, col)
+    pairs = torch.stack([src, dst], dim=0)
+    unique_pairs = torch.unique(pairs, dim=1)
+    num_edges = unique_pairs.size(1)
+    if num_edges == 0:
+        return edge_index
+    num_drop = int(round(drop_prob * num_edges))
+    if num_drop <= 0:
+        return edge_index
+    if num_drop >= num_edges:
+        empty_edge_index = torch.empty(
+            (2, 0),
+            dtype=edge_index.dtype,
+            device=device,
+        )
+        return empty_edge_index
+    u = unique_pairs[0]
+    v = unique_pairs[1]
+    num_nodes = int(torch.max(unique_pairs).item()) + 1
+    degree = torch.zeros(num_nodes, dtype=torch.float)
+    degree.scatter_add_(
+        0,
+        u,
+        torch.ones_like(u, dtype=torch.float),
+    )
+    degree.scatter_add_(
+        0,
+        v,
+        torch.ones_like(v, dtype=torch.float),
+    )
+    edge_scores = degree[u] + degree[v]
+    weights = edge_scores.pow(degree_power)
+    weights = weights + 1e-12
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    drop_indices = torch.multinomial(
+        weights,
+        num_samples=num_drop,
+        replacement=False,
+        generator=generator,
+    )
+    keep_mask = torch.ones(num_edges, dtype=torch.bool)
+    keep_mask[drop_indices] = False
+    kept_pairs = unique_pairs[:, keep_mask]
+    new_edge_index = to_undirected(
+        kept_pairs,
+        num_nodes=num_nodes,
+    )
+    return new_edge_index.to(device) 
 
 class EvalEachEpochCallback(Callback):
     def __init__(self, val_loader, dataset_name):
@@ -398,19 +459,31 @@ def main(argv):
 
     if FLAGS.edge_drop_prob > 0 and hasattr(dataset, "graph_data"):
         old_edges = dataset.graph_data.edge_index.size(1)
-        dataset.graph_data.edge_index = drop_edges_undirected(
-            dataset.graph_data.edge_index,
-            drop_prob=FLAGS.edge_drop_prob,
-            seed=FLAGS.edge_drop_seed,
-        )
+        if FLAGS.edge_drop_mode == "random":
+            dataset.graph_data.edge_index = drop_edges_undirected(
+                dataset.graph_data.edge_index,
+                drop_prob=FLAGS.edge_drop_prob,
+                seed=FLAGS.edge_drop_seed,
+            )
+        elif FLAGS.edge_drop_mode == "degree":
+            dataset.graph_data.edge_index = drop_edges_degree_aware(
+                dataset.graph_data.edge_index,
+                drop_prob=FLAGS.edge_drop_prob,
+                seed=FLAGS.edge_drop_seed,
+                degree_power=FLAGS.edge_drop_degree_power,
+            )
+        else:
+            raise ValueError(f"Unknown edge_drop_mode: {FLAGS.edge_drop_mode}")
         new_edges = dataset.graph_data.edge_index.size(1)
         logging.info(
-            "Applied inference-time edge drop: p=%s, seed=%s, edges %s -> %s",
+            "Applied edge drop: mode=%s, p=%s, seed=%s, edges %s -> %s",
+            FLAGS.edge_drop_mode,
             FLAGS.edge_drop_prob,
             FLAGS.edge_drop_seed,
             old_edges,
             new_edges,
         )
+
     if FLAGS.node_feature_noise != "none" and hasattr(dataset, "graph_data"):
         logging.info(
             "Applying node feature perturbation: mode=%s, seed=%s, std=%s",
