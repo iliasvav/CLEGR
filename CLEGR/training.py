@@ -102,6 +102,9 @@ flags.DEFINE_enum("node_feature_noise", "none", ["none", "shuffle", "gaussian", 
 flags.DEFINE_float("node_feature_noise_std", 0.1, "Std for Gaussian node feature noise.")
 flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature perturbation.")
 
+flags.DEFINE_float("adversarial_edge_add_prob", 0.0, "Number of adversarial edges to add as a fraction of the original undirected edge count.",)
+flags.DEFINE_integer("adversarial_edge_seed", 42, "Random seed for adversarial edge addition",)
+
 #report accuracy after each epoch
 flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation evaluation after each epoch.")
 flags.DEFINE_string("eval_split", "test", "Which split to evaluate: train, val, test.")
@@ -143,6 +146,86 @@ def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, 
     metrics = evaluator.compute_metrics()
     evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
+
+def add_adversarial_cross_class_edges(edge_index, labels, add_prob, seed=42,):
+    """
+    Add undirected edges between nodes belonging to different classes.
+    """
+    if add_prob <= 0:
+        return edge_index
+    assert add_prob >= 0.0
+    device = edge_index.device
+    edge_index_cpu = edge_index.cpu()
+    labels_cpu = labels.cpu().view(-1)
+    row, col = edge_index_cpu
+    src = torch.minimum(row, col)
+    dst = torch.maximum(row, col)
+    pairs = torch.stack([src, dst], dim=0)
+    unique_pairs = torch.unique(pairs, dim=1)
+    num_original_edges = unique_pairs.size(1)
+    num_nodes = labels_cpu.numel()
+    num_to_add = int(round(add_prob * num_original_edges))
+    if num_to_add == 0:
+        return edge_index
+    existing_edges = {
+        (int(u), int(v))
+        for u, v in unique_pairs.t().tolist()
+    }
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    new_edges = set()
+    max_attempts = max(num_to_add * 100, 10000)
+    attempts = 0
+    while len(new_edges) < num_to_add and attempts < max_attempts:
+        attempts += 1
+        u = int(
+            torch.randint(
+                0,
+                num_nodes,
+                (1,),
+                generator=generator,
+            ).item()
+        )
+        v = int(
+            torch.randint(
+                0,
+                num_nodes,
+                (1,),
+                generator=generator,
+            ).item()
+        )
+        if u == v:
+            continue
+        if labels_cpu[u].item() == labels_cpu[v].item():
+            continue
+        a = min(u, v)
+        b = max(u, v)
+        pair = (a, b)
+        if pair in existing_edges:
+            continue
+        if pair in new_edges:
+            continue
+        new_edges.add(pair)
+    if len(new_edges) < num_to_add:
+        print(
+            f"WARNING: Requested {num_to_add} adversarial edges "
+            f"but could only generate {len(new_edges)}."
+        )
+    if len(new_edges) == 0:
+        return edge_index
+    added_pairs = torch.tensor(
+        list(new_edges),
+        dtype=edge_index_cpu.dtype,
+    ).t()
+    combined_pairs = torch.cat(
+        [unique_pairs, added_pairs],
+        dim=1,
+    )
+    new_edge_index = to_undirected(
+        combined_pairs,
+        num_nodes=num_nodes,
+    )
+    return new_edge_index.to(device)
 
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
@@ -484,6 +567,26 @@ def main(argv):
             FLAGS.edge_drop_mode,
             FLAGS.edge_drop_prob,
             FLAGS.edge_drop_seed,
+            old_edges,
+            new_edges,
+        )
+
+    if (FLAGS.adversarial_edge_add_prob > 0 and hasattr(dataset, "graph_data")):
+        if not hasattr(dataset.graph_data, "y"):
+            raise ValueError("Adversarial cross-class edge addition requires graph_data.y labels.")
+        old_edges = dataset.graph_data.edge_index.size(1)
+        dataset.graph_data.edge_index = add_adversarial_cross_class_edges(
+            dataset.graph_data.edge_index,
+            dataset.graph_data.y,
+            add_prob=FLAGS.adversarial_edge_add_prob,
+            seed=FLAGS.adversarial_edge_seed,
+        )
+        new_edges = dataset.graph_data.edge_index.size(1)
+        logging.info(
+            "Applied adversarial cross-class edge addition: "
+            "add_prob=%s, seed=%s, directed edges %s -> %s",
+            FLAGS.adversarial_edge_add_prob,
+            FLAGS.adversarial_edge_seed,
             old_edges,
             new_edges,
         )
