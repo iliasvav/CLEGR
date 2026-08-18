@@ -331,6 +331,12 @@ def build_output_csv_path():
             f"node-{FLAGS.node_feature_noise}",
             f"node-seed-{FLAGS.node_feature_seed}",
         ])
+    if FLAGS.adversarial_edge_add_prob > 0:
+        parts.extend([
+            "advedge",
+            f"p-{FLAGS.adversarial_edge_add_prob:g}",
+            f"advseed-{FLAGS.adversarial_edge_seed}",
+        ])
     filename = "_".join(parts)
     filename = filename.replace("/", "_")
     return os.path.join("logs", filename + ".csv")
