@@ -105,6 +105,8 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 flags.DEFINE_float("adversarial_edge_add_prob", 0.0, "Number of adversarial edges to add as a fraction of the original undirected edge count.",)
 flags.DEFINE_integer("adversarial_edge_seed", 42, "Random seed for adversarial edge addition",)
 
+flags.DEFINE_bool("no_graph_token", False, "If True, do not provide GNN graph tokens to the LLM during inference")
+
 #report accuracy after each epoch
 flags.DEFINE_bool("eval_each_epoch", False, "Run full generative validation evaluation after each epoch.")
 flags.DEFINE_string("eval_split", "test", "Which split to evaluate: train, val, test.")
@@ -320,6 +322,8 @@ def build_output_csv_path():
         FLAGS.llm_model_name,
         f"context-{FLAGS.context_mode}",
     ]
+    if FLAGS.no_graph_token:
+        parts.append("no-graph-token")
     if FLAGS.edge_drop_prob > 0:
         parts.extend([
             f"edge-{FLAGS.edge_drop_mode}",
@@ -492,7 +496,7 @@ def evaluate(model: BaseGLM, loader, evaluator: DatasetEvaluator, graph_data=Non
 
             data = data.to(model.llm.device)
             out_seq = model.inference(
-                data, max_out_tokens=max_tok_len, graph_data=graph_data
+                data, max_out_tokens=max_tok_len, graph_data=graph_data, no_graph_token=FLAGS.no_graph_token,
             )[0]
             evaluator(data, out_seq)
 

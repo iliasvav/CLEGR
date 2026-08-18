@@ -119,6 +119,7 @@ class TEA_GLM(BaseGLM):
         max_out_tokens: int,
         graph_data: Optional[Data] = None,
         modifier: Optional[Modifier] = None,
+        no_graph_token: bool = False,
     ):
         self.llm.eval()
 
@@ -128,30 +129,30 @@ class TEA_GLM(BaseGLM):
         node_id = data.node_id if hasattr(data, "node_id") else None
         context = data.context if hasattr(data, "context") else None
         question = data.question
-
-        if graph_data is not None:
-            # Encode the graph using the provided GNN.
-            x = self.encode_graph(graph_data)
+        
+        if no_graph_token:
+            xs = None
         else:
-            # Encode the graph using the GNN from the data.
-            x = self.encode_graph(data)
+            if graph_data is not None:
+                x = self.encode_graph(graph_data)
+            else:
+                x = self.encode_graph(data)
+            if node_id is not None:
+                x = x[node_id]
+            x = self.projector(x)
+            if isinstance(node_id, list):
+                x = x.view(1, -1, x.shape[-1])
+            xs = [hi.squeeze(0) for hi in x.split(1, dim=0)]
 
-        if node_id is not None:
-            x = x[node_id]
-        x = self.projector(x)
-        # if node id is a list, we reshape from (n, num_tokens, d) to (1, n * num_tokens, d)
-        if isinstance(node_id, list):
-            x = x.view(1, -1, x.shape[-1])
-        xs = [hi.squeeze(0) for hi in x.split(1, dim=0)]
-        # convert context to text from dict
+            batch_unique = data.batch.unique()
+            batch_size = len(question)
+
+            if len(batch_unique) < batch_size:
+                xs = [
+                    xs[i] if i in batch_unique else None
+                    for i in range(batch_size)
+                ]
         con = self.get_context(data)
-        # Ensure that the number of graph tokens aligns with the batch.
-        batch_unique = data.batch.unique()
-        batch_size = len(question)
-        if len(batch_unique) < batch_size:
-            xs = [xs[i] if i in batch_unique else None for i in range(batch_size)]
-
-        # Get the inputs for the language model.
         inputs_embeds, attention_mask, _ = self.llm._get_embeds(
             question, con, xs, modifier=modifier
         )
