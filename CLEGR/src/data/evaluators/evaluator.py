@@ -36,16 +36,16 @@ class DatasetEvaluator:
             "accuracy": accuracy_score(self.gts, self.preds),
         }
 
-    def log_raw(self):
+    def log_raw(self, path="logs/output.csv"):
         """
         Log the raw LLM output and the ground truth to a CSV file.
         """
         # ensure the logs directory exists
         import os
-        os.makedirs("logs", exist_ok=True)
-        with open("logs/output.csv", "w"):
-            writer = csv.writer(open("logs/output.csv", "w"))
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
             writer.writerow(["Prediction", "Ground Truth"])
             for pred, gt in self.raw_records:
                 writer.writerow([pred, gt])
-        logging.info("Raw outputs logged to logs/output.csv")
+        logging.info("Raw outputs logged to %s", path)

@@ -93,7 +93,7 @@ flags.DEFINE_enum(
 )
 
 #black box flags
-flags.DEFINE_string("edge_drop_mode", "none", ["random" "degree"], "Edge dropping strategy: random or degree-aware.")
+flags.DEFINE_enum("edge_drop_mode", "none", ["none", "random", "degree"], "Edge dropping strategy: random or degree-aware.")
 flags.DEFINE_float("edge_drop_prob", 0.0, "Fraction of undirected edges to drop.")
 flags.DEFINE_float("edge_drop_degree_power", 1.0, "Strength of degree bias for degree-aware edge dropping.")
 flags.DEFINE_integer("edge_drop_seed", 42, "Random seed for edge dropping.")
@@ -114,13 +114,7 @@ def get_candidate_labels(dataset):
     logging.info("Found %d candidate labels: %s", len(labels), labels)
     return labels
 
-def evaluate_label_scoring(
-    model: BaseGLM,
-    loader,
-    evaluator: DatasetEvaluator,
-    candidate_labels,
-    graph_data=None,
-):
+def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, candidate_labels, graph_data=None, output_path=None,):
     model.eval()
     graph_data = graph_data.to(model.llm.device) if graph_data else None
     num_samples = (
@@ -147,7 +141,7 @@ def evaluate_label_scoring(
             best_label = min(scores, key=scores.get)
             evaluator(data, best_label)
     metrics = evaluator.compute_metrics()
-    evaluator.log_raw()
+    evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
 
 def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
@@ -217,16 +211,8 @@ def drop_edges_degree_aware(edge_index, drop_prob, seed=42, degree_power=1.0,):
     v = unique_pairs[1]
     num_nodes = int(torch.max(unique_pairs).item()) + 1
     degree = torch.zeros(num_nodes, dtype=torch.float)
-    degree.scatter_add_(
-        0,
-        u,
-        torch.ones_like(u, dtype=torch.float),
-    )
-    degree.scatter_add_(
-        0,
-        v,
-        torch.ones_like(v, dtype=torch.float),
-    )
+    degree.scatter_add_(0, u, torch.ones_like(u, dtype=torch.float),)
+    degree.scatter_add_(0, v, torch.ones_like(v, dtype=torch.float),)
     edge_scores = degree[u] + degree[v]
     weights = edge_scores.pow(degree_power)
     weights = weights + 1e-12
@@ -247,6 +233,26 @@ def drop_edges_degree_aware(edge_index, drop_prob, seed=42, degree_power=1.0,):
     )
     return new_edge_index.to(device) 
 
+def build_output_csv_path():
+    parts = [
+        FLAGS.dataset,
+        FLAGS.llm_model_name,
+        f"context-{FLAGS.context_mode}",
+    ]
+    if FLAGS.edge_drop_prob > 0:
+        parts.extend([
+            f"edge-{FLAGS.edge_drop_mode}",
+            f"p-{FLAGS.edge_drop_prob:g}",
+            f"seed-{FLAGS.edge_drop_seed}",
+        ])
+    #if FLAGS.node_feature_noise != "none":
+    #    parts.extend([
+    #        f"node-{FLAGS.node_feature_noise}",
+    #        f"node-seed-{FLAGS.node_feature_seed}",
+    #    ])
+    filename = "_".join(parts)
+    filename = filename.replace("/", "_")
+    return os.path.join("logs", filename + ".csv")
 class EvalEachEpochCallback(Callback):
     def __init__(self, val_loader, dataset_name):
         super().__init__()
@@ -380,7 +386,7 @@ def train_with_lightning(
         logging.info("Saved LoRA adapters to %s", lora_dir)
 
 
-def evaluate(model: BaseGLM, loader, evaluator: DatasetEvaluator, graph_data=None):
+def evaluate(model: BaseGLM, loader, evaluator: DatasetEvaluator, graph_data=None, output_path=None,):
     model.eval()
     graph_data = graph_data.to(model.llm.device) if graph_data else None
     max_tok_len = evaluator.max_class_toklen(model.llm.tokenizer)
@@ -404,7 +410,7 @@ def evaluate(model: BaseGLM, loader, evaluator: DatasetEvaluator, graph_data=Non
             evaluator(data, out_seq)
 
     metrics = evaluator.compute_metrics()
-    evaluator.log_raw()
+    evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
 
 
@@ -570,12 +576,15 @@ def main(argv):
             shuffle=False,
             num_workers=FLAGS.num_workers,
         )
+        output_csv_path = build_output_csv_path()
+        logging.info("Predictions will be saved to %s", output_csv_path)
         if FLAGS.eval_mode == "generation":
             metrics = evaluate(
                 model.model,
                 eval_loader,
                 evaluator,
                 graph_data=dataset.graph_data,
+                output_path=output_csv_path,
             )
         elif FLAGS.eval_mode == "label_scoring":
             candidate_labels = get_candidate_labels(dataset)
@@ -585,6 +594,7 @@ def main(argv):
                 evaluator,
                 candidate_labels,
                 graph_data=dataset.graph_data,
+                output_path=output_csv_path,
             )
         else:
             raise ValueError(f"Unknown eval_mode: {FLAGS.eval_mode}")
