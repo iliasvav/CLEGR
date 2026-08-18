@@ -98,7 +98,7 @@ flags.DEFINE_float("edge_drop_prob", 0.0, "Fraction of undirected edges to drop.
 flags.DEFINE_float("edge_drop_degree_power", 1.0, "Strength of degree bias for degree-aware edge dropping.")
 flags.DEFINE_integer("edge_drop_seed", 42, "Random seed for edge dropping.")
 
-flags.DEFINE_string("node_feature_noise", "none", "Node feature perturbation: none, shuffle, gaussian, zero.")
+flags.DEFINE_enum("node_feature_noise", "none", ["none", "shuffle", "gaussian", "zero"], "Node feature perturbation mode.",)
 flags.DEFINE_float("node_feature_noise_std", 0.1, "Std for Gaussian node feature noise.")
 flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature perturbation.")
 
@@ -148,12 +148,10 @@ def perturb_node_features(x, mode="none", seed=42, noise_std=0.1):
     if mode == "none":
         return x
     assert mode in ["shuffle", "gaussian", "zero"]
-
     device = x.device
     x_cpu = x.cpu()
     generator = torch.Generator()
     generator.manual_seed(seed)
-
     if mode == "shuffle":
         perm = torch.randperm(x_cpu.size(0), generator=generator)
         new_x = x_cpu[perm]
@@ -245,11 +243,11 @@ def build_output_csv_path():
             f"p-{FLAGS.edge_drop_prob:g}",
             f"seed-{FLAGS.edge_drop_seed}",
         ])
-    #if FLAGS.node_feature_noise != "none":
-    #    parts.extend([
-    #        f"node-{FLAGS.node_feature_noise}",
-    #        f"node-seed-{FLAGS.node_feature_seed}",
-    #    ])
+    if FLAGS.node_feature_noise != "none":
+        parts.extend([
+            f"node-{FLAGS.node_feature_noise}",
+            f"node-seed-{FLAGS.node_feature_seed}",
+        ])
     filename = "_".join(parts)
     filename = filename.replace("/", "_")
     return os.path.join("logs", filename + ".csv")
