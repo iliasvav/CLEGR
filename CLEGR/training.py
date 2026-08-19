@@ -365,6 +365,11 @@ def build_output_csv_path():
         FLAGS.llm_model_name,
         f"context-{FLAGS.context_mode}",
     ]
+    if FLAGS.context_perturbation != "none":
+        parts.extend([
+            f"contextpert-{FLAGS.context_perturbation}",
+            f"contextseed-{FLAGS.context_shuffle_seed}",
+        ])
     if FLAGS.no_graph_token:
         parts.append("no-graph-token")
     if FLAGS.edge_drop_prob > 0:
