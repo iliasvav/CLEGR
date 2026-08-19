@@ -152,14 +152,14 @@ def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, 
     evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
 
-def build_shuffled_context_map(dataset, mode="shuffle", seed=42,):
+def build_shuffled_context_map(dataset, mode="shuffle", seed=42):
     """
     Build a mapping:
-        node_id -> context from another node
+        target node_id -> context from another node
     """
     assert mode in ["shuffle", "cross_class_shuffle"]
     node_ids = []
-    contexts = []
+    contexts_by_node_id = {}
     for i in range(len(dataset)):
         sample = dataset[i]
         node_id = sample.node_id
@@ -168,17 +168,33 @@ def build_shuffled_context_map(dataset, mode="shuffle", seed=42,):
         else:
             node_id = int(node_id)
         node_ids.append(node_id)
-        contexts.append({
+        contexts_by_node_id[node_id] = {
             "Title": sample.context["Title"],
             "Abstract": sample.context["Abstract"],
-        })
+        }
     generator = torch.Generator()
     generator.manual_seed(seed)
+    shuffled_map = {}
     if mode == "shuffle":
         perm = torch.randperm(
-            len(contexts),
+            len(node_ids),
             generator=generator,
         ).tolist()
+        for i, target_node_id in enumerate(node_ids):
+            source_node_id = node_ids[perm[i]]
+            shuffled_map[target_node_id] = (
+                contexts_by_node_id[source_node_id]
+            )
+        unchanged = sum(
+            node_ids[i] == node_ids[perm[i]]
+            for i in range(len(node_ids))
+        )
+        logging.info(
+            "Random context shuffle: "
+            "%d samples, %d unchanged assignments",
+            len(node_ids),
+            unchanged,
+        )
     elif mode == "cross_class_shuffle":
         if not hasattr(dataset, "graph_data"):
             raise ValueError(
@@ -189,16 +205,20 @@ def build_shuffled_context_map(dataset, mode="shuffle", seed=42,):
                 "cross_class_shuffle requires dataset.graph_data.y."
             )
         labels = dataset.graph_data.y.cpu().view(-1)
-        perm = []
-        for node_id in node_ids:
-            source_class = labels[node_id].item()
-            candidates = torch.where(
-                labels != source_class
-            )[0]
+        available_node_ids = torch.tensor(
+            node_ids,
+            dtype=torch.long,
+        )
+        for target_node_id in node_ids:
+            target_class = labels[target_node_id].item()
+            candidate_mask = (
+                labels[available_node_ids] != target_class
+            )
+            candidates = available_node_ids[candidate_mask]
             if len(candidates) == 0:
                 raise RuntimeError(
                     f"No cross-class context candidate "
-                    f"for node {node_id}."
+                    f"for node {target_node_id}."
                 )
             random_idx = torch.randint(
                 0,
@@ -206,24 +226,21 @@ def build_shuffled_context_map(dataset, mode="shuffle", seed=42,):
                 (1,),
                 generator=generator,
             ).item()
-            selected_node = int(
+            source_node_id = int(
                 candidates[random_idx].item()
             )
-            assert labels[node_id].item() != labels[selected_node].item()
-            perm.append(selected_node)
-    violations = 0
-    for i, node_id in enumerate(node_ids):
-        if labels[node_id].item() == labels[perm[i]].item():
-            violations += 1
-    logging.info(
-        "Cross-class context shuffle sanity check: "
-        "%d same-class assignments",
-        violations,
-    )
-    shuffled_map = {}
-    for i, node_id in enumerate(node_ids):
-        source_idx = perm[i]
-        shuffled_map[node_id] = contexts[source_idx]
+            assert (
+                labels[target_node_id].item()
+                != labels[source_node_id].item()
+            )
+            shuffled_map[target_node_id] = (
+                contexts_by_node_id[source_node_id]
+            )
+        logging.info(
+            "Cross-class context shuffle created for %d nodes "
+            "with 0 same-class assignments.",
+            len(shuffled_map),
+        )
     return shuffled_map
 
 def add_adversarial_cross_class_edges(edge_index, labels, add_prob, seed=42,):
