@@ -105,7 +105,7 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 flags.DEFINE_float("adversarial_edge_add_prob", 0.0, "Number of adversarial edges to add as a fraction of the original undirected edge count.",)
 flags.DEFINE_integer("adversarial_edge_seed", 42, "Random seed for adversarial edge addition",)
 
-flags.DEFINE_enum("context_perturbation", "none", ["none", "shuffle"], "Context perturbation mode.")
+flags.DEFINE_enum("context_perturbation", "none", ["none", "shuffle", "cross_class_shuffle"], "Context perturbation mode.")
 flags.DEFINE_integer("context_shuffle_seed", 42, "Random seed for shuffling context across samples.")
 
 flags.DEFINE_bool("no_graph_token", False, "If True, do not provide GNN graph tokens to the LLM during inference")
@@ -152,10 +152,12 @@ def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, 
     evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
 
-def build_shuffled_context_map(dataset, seed=42):
+def build_shuffled_context_map(dataset, mode="shuffle", seed=42,):
     """
-    Shuffle complete Title+Abstract pairs between nodes.
+    Build a mapping:
+        node_id -> context from another node
     """
+    assert mode in ["shuffle", "cross_class_shuffle"]
     node_ids = []
     contexts = []
     for i in range(len(dataset)):
@@ -172,24 +174,56 @@ def build_shuffled_context_map(dataset, seed=42):
         })
     generator = torch.Generator()
     generator.manual_seed(seed)
-    perm = torch.randperm(
-        len(contexts),
-        generator=generator,
-    ).tolist()
-    shuffled_map = {
-        node_ids[i]: contexts[perm[i]]
-        for i in range(len(node_ids))
-    }
-    unchanged = sum(
-        perm[i] == i
-        for i in range(len(perm))
-    )
+    if mode == "shuffle":
+        perm = torch.randperm(
+            len(contexts),
+            generator=generator,
+        ).tolist()
+    elif mode == "cross_class_shuffle":
+        if not hasattr(dataset, "graph_data"):
+            raise ValueError(
+                "cross_class_shuffle requires dataset.graph_data."
+            )
+        if not hasattr(dataset.graph_data, "y"):
+            raise ValueError(
+                "cross_class_shuffle requires dataset.graph_data.y."
+            )
+        labels = dataset.graph_data.y.cpu().view(-1)
+        perm = []
+        for node_id in node_ids:
+            source_class = labels[node_id].item()
+            candidates = torch.where(
+                labels != source_class
+            )[0]
+            if len(candidates) == 0:
+                raise RuntimeError(
+                    f"No cross-class context candidate "
+                    f"for node {node_id}."
+                )
+            random_idx = torch.randint(
+                0,
+                len(candidates),
+                (1,),
+                generator=generator,
+            ).item()
+            selected_node = int(
+                candidates[random_idx].item()
+            )
+            assert labels[node_id].item() != labels[selected_node].item()
+            perm.append(selected_node)
+    violations = 0
+    for i, node_id in enumerate(node_ids):
+        if labels[node_id].item() == labels[perm[i]].item():
+            violations += 1
     logging.info(
-        "Context shuffle: %d samples, seed=%d, unchanged=%d",
-        len(contexts),
-        seed,
-        unchanged,
+        "Cross-class context shuffle sanity check: "
+        "%d same-class assignments",
+        violations,
     )
+    shuffled_map = {}
+    for i, node_id in enumerate(node_ids):
+        source_idx = perm[i]
+        shuffled_map[node_id] = contexts[source_idx]
     return shuffled_map
 
 def add_adversarial_cross_class_edges(edge_index, labels, add_prob, seed=42,):
@@ -603,15 +637,24 @@ def main(argv):
         logging.error("Error accessing data list items: %s", e)
 
     shuffled_context_map = None
-
-    if FLAGS.context_perturbation == "shuffle":
+    if FLAGS.context_perturbation in [
+        "shuffle",
+        "cross_class_shuffle",
+    ]:
         if FLAGS.dataset != "cora":
             raise ValueError(
-                "Context shuffling is currently implemented for Cora only."
+                "Context perturbation is currently implemented for Cora only."
             )
         shuffled_context_map = build_shuffled_context_map(
             dataset,
+            mode=FLAGS.context_perturbation,
             seed=FLAGS.context_shuffle_seed,
+        )
+        logging.info(
+            "Built context mapping: mode=%s, seed=%s, samples=%d",
+            FLAGS.context_perturbation,
+            FLAGS.context_shuffle_seed,
+            len(shuffled_context_map),
         )
 
     if FLAGS.edge_drop_prob > 0 and hasattr(dataset, "graph_data"):

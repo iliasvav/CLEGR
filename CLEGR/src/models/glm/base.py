@@ -118,7 +118,7 @@ class BaseGLM(torch.nn.Module):
             "context_perturbation",
             "none",
         )
-        if context_perturbation == "shuffle":
+        if context_perturbation in ["shuffle", "cross_class_shuffle",]:
             shuffled_context_map = getattr(
                 self,
                 "shuffled_context_map",
