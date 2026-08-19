@@ -111,8 +111,57 @@ class BaseGLM(torch.nn.Module):
         return con"""
     
     def get_context(self, data):
-        context_mode = getattr(self, "context_mode", "full")
         context = data.context
+        context_mode = getattr(self, "context_mode", "full")
+        context_perturbation = getattr(
+            self,
+            "context_perturbation",
+            "none",
+        )
+        if context_perturbation == "shuffle":
+            shuffled_context_map = getattr(
+                self,
+                "shuffled_context_map",
+                None,
+            )
+            if shuffled_context_map is None:
+                raise RuntimeError(
+                    "Context shuffle requested but "
+                    "shuffled_context_map is missing."
+                )
+            if not hasattr(data, "node_id"):
+                raise RuntimeError(
+                    "Context shuffle requires node_id."
+                )
+            node_ids = data.node_id
+            # Comment this out
+            if len(node_ids) > 0:
+                node_id = int(node_ids[0])
+                logging.info(
+                    "CONTEXT SHUFFLE sanity check | node=%s | "
+                    "original=%s | shuffled=%s",
+                    node_id,
+                    data.context,
+                    shuffled_context_map[node_id],
+                )
+            if torch.is_tensor(node_ids):
+                node_ids = node_ids.view(-1).tolist()
+            elif not isinstance(node_ids, (list, tuple)):
+                node_ids = [node_ids]
+            shuffled_titles = []
+            shuffled_abstracts = []
+            for node_id in node_ids:
+                shuffled = shuffled_context_map[int(node_id)]
+                shuffled_titles.append(
+                    shuffled["Title"]
+                )
+                shuffled_abstracts.append(
+                    shuffled["Abstract"]
+                )
+            context = {
+                "Title": shuffled_titles,
+                "Abstract": shuffled_abstracts,
+            }
         con = []
         for i in range(len(data.question)):
             tempcon = ""

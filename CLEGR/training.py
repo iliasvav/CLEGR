@@ -105,6 +105,9 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 flags.DEFINE_float("adversarial_edge_add_prob", 0.0, "Number of adversarial edges to add as a fraction of the original undirected edge count.",)
 flags.DEFINE_integer("adversarial_edge_seed", 42, "Random seed for adversarial edge addition",)
 
+flags.DEFINE_enum("context_perturbation", "none", ["none", "shuffle"], "Context perturbation mode.")
+flags.DEFINE_integer("context_shuffle_seed", 42, "Random seed for shuffling context across samples.")
+
 flags.DEFINE_bool("no_graph_token", False, "If True, do not provide GNN graph tokens to the LLM during inference")
 
 #report accuracy after each epoch
@@ -148,6 +151,46 @@ def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, 
     metrics = evaluator.compute_metrics()
     evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
     return metrics
+
+def build_shuffled_context_map(dataset, seed=42):
+    """
+    Shuffle complete Title+Abstract pairs between nodes.
+    """
+    node_ids = []
+    contexts = []
+    for i in range(len(dataset)):
+        sample = dataset[i]
+        node_id = sample.node_id
+        if torch.is_tensor(node_id):
+            node_id = int(node_id.item())
+        else:
+            node_id = int(node_id)
+        node_ids.append(node_id)
+        contexts.append({
+            "Title": sample.context["Title"],
+            "Abstract": sample.context["Abstract"],
+        })
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    perm = torch.randperm(
+        len(contexts),
+        generator=generator,
+    ).tolist()
+    shuffled_map = {
+        node_ids[i]: contexts[perm[i]]
+        for i in range(len(node_ids))
+    }
+    unchanged = sum(
+        perm[i] == i
+        for i in range(len(perm))
+    )
+    logging.info(
+        "Context shuffle: %d samples, seed=%d, unchanged=%d",
+        len(contexts),
+        seed,
+        unchanged,
+    )
+    return shuffled_map
 
 def add_adversarial_cross_class_edges(edge_index, labels, add_prob, seed=42,):
     """
@@ -554,6 +597,18 @@ def main(argv):
     except Exception as e:
         logging.error("Error accessing data list items: %s", e)
 
+    shuffled_context_map = None
+
+    if FLAGS.context_perturbation == "shuffle":
+        if FLAGS.dataset != "cora":
+            raise ValueError(
+                "Context shuffling is currently implemented for Cora only."
+            )
+        shuffled_context_map = build_shuffled_context_map(
+            dataset,
+            seed=FLAGS.context_shuffle_seed,
+        )
+
     if FLAGS.edge_drop_prob > 0 and hasattr(dataset, "graph_data"):
         old_edges = dataset.graph_data.edge_index.size(1)
         if FLAGS.edge_drop_mode == "random":
@@ -630,6 +685,8 @@ def main(argv):
     )
 
     model.model.context_mode = FLAGS.context_mode
+    model.model.context_perturbation = FLAGS.context_perturbation
+    model.model.shuffled_context_map = shuffled_context_map
 
     # Train or evaluate
     if not FLAGS.evaluate and FLAGS.method != "llm-only":
@@ -667,6 +724,8 @@ def main(argv):
                 logging.info("Active PEFT adapters: %s", getattr(lm_module.model.llm_generator, "active_adapters", None))
             model = lm_module
             model.model.context_mode = FLAGS.context_mode
+            model.model.context_perturbation = FLAGS.context_perturbation
+            model.model.shuffled_context_map = shuffled_context_map
         except Exception as e:
             if FLAGS.method == "llm-only":
                 logging.info("Loading LLM only model. No checkpoint found.")
