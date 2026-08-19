@@ -134,16 +134,6 @@ class BaseGLM(torch.nn.Module):
                     "Context shuffle requires node_id."
                 )
             node_ids = data.node_id
-            # Comment this out
-            if len(node_ids) > 0:
-                node_id = int(node_ids[0])
-                logging.info(
-                    "CONTEXT SHUFFLE sanity check | node=%s | "
-                    "original=%s | shuffled=%s",
-                    node_id,
-                    data.context,
-                    shuffled_context_map[node_id],
-                )
             if torch.is_tensor(node_ids):
                 node_ids = node_ids.view(-1).tolist()
             elif not isinstance(node_ids, (list, tuple)):
