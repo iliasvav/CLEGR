@@ -118,7 +118,19 @@ class BaseGLM(torch.nn.Module):
             "context_perturbation",
             "none",
         )
-        if context_perturbation in ["shuffle", "cross_class_shuffle",]:
+        if context_perturbation == "constant_full":
+            batch_size = len(data.question)
+            context = {
+                "Title": ["Research Paper"] * batch_size,
+                "Abstract": ["This is a research paper."] * batch_size,
+            }
+        elif context_perturbation == "constant_title":
+            batch_size = len(data.question)
+            context = {
+                "Title": ["Research Paper"] * batch_size,
+                "Abstract": [""] * batch_size,
+            }
+        elif context_perturbation in ["shuffle", "cross_class_shuffle",]:
             shuffled_context_map = getattr(
                 self,
                 "shuffled_context_map",

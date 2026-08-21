@@ -105,7 +105,7 @@ flags.DEFINE_integer("node_feature_seed", 42, "Random seed for node feature pert
 flags.DEFINE_float("adversarial_edge_add_prob", 0.0, "Number of adversarial edges to add as a fraction of the original undirected edge count.",)
 flags.DEFINE_integer("adversarial_edge_seed", 42, "Random seed for adversarial edge addition",)
 
-flags.DEFINE_enum("context_perturbation", "none", ["none", "shuffle", "cross_class_shuffle"], "Context perturbation mode.")
+flags.DEFINE_enum("context_perturbation", "none", ["none", "shuffle", "cross_class_shuffle", "constant_full", "constant_title"], "Context perturbation mode.")
 flags.DEFINE_integer("context_shuffle_seed", 42, "Random seed for shuffling context across samples.")
 
 flags.DEFINE_bool("no_graph_token", False, "If True, do not provide GNN graph tokens to the LLM during inference")
