@@ -12,16 +12,10 @@ try:
 except ImportError:
     BatchEncoding = Dict
 
-BOS = '<s>[INST]'
-EOS_USER = '[/INST]'
-EOS = '[/s]'
 IGNORE_INDEX = -100
 MAX_TXT_LEN = 16384
 MAX_NEW_TOKENS = 32
-PAD_TOKEN_ID = 0
 PADDING_SIDE = 'left'
-
-
 class LLM(torch.nn.Module):
     r"""A wrapper around a Large Language Model (LLM) from HuggingFace.
 
@@ -77,36 +71,197 @@ class LLM(torch.nn.Module):
             model_name,
             use_fast=False,
         )
-        self.tokenizer.pad_token_id = PAD_TOKEN_ID
         self.tokenizer.padding_side = PADDING_SIDE
+        if self.tokenizer.pad_token_id is None:
+            if self.tokenizer.eos_token_id is None:
+                raise ValueError(
+                    f"Tokenizer for {model_name} has neither a pad token nor an EOS token."
+                )
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.llm.config.pad_token_id = self.tokenizer.pad_token_id
+        if getattr(self.llm, "generation_config", None) is not None:
+            self.llm.generation_config.pad_token_id = self.tokenizer.pad_token_id
+        (
+            self.user_prefix,
+            self.user_suffix,
+            self.answer_suffix,
+        ) = self._build_prompt_format()
+        print(f"\nPrompt format for {self.model_name}")
+        print("  chat_template:", self.tokenizer.chat_template is not None)
+        print("  user_prefix:", repr(self.user_prefix))
+        print("  user_suffix:", repr(self.user_suffix))
+        print("  answer_suffix:", repr(self.answer_suffix))
+        print(
+            "  pad:",
+            repr(self.tokenizer.pad_token),
+            self.tokenizer.pad_token_id,
+        )
+        print(
+            "  bos:",
+            repr(self.tokenizer.bos_token),
+            self.tokenizer.bos_token_id,
+        )
+        print(
+            "  eos:",
+            repr(self.tokenizer.eos_token),
+            self.tokenizer.eos_token_id,
+        )
         #self.llm = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
         self.word_embedding = self.llm.model.get_input_embeddings()
 
         self.device = self.llm.device
         self.autocast_context = torch.amp.autocast(device_type="cuda", dtype=dtype)
 
+    def _build_prompt_format(self) -> tuple[str, str, str]:
+        """
+        Build a model-appropriate prompt format while preserving the location
+        where continuous graph embeddings are inserted.
+        Returns:
+            user_prefix:
+                Text occurring before the graph embeddings.
+            user_suffix:
+                Text occurring after context/question and immediately before the
+                assistant's answer.
+            answer_suffix:
+                Text appended after the ground-truth answer during training.
+        """
+
+        # ------------------------------------------------------------------
+        # Instruction/chat models
+        # ------------------------------------------------------------------
+        if self.tokenizer.chat_template is not None:
+            content_marker = "CLEGR_CONTENT_MARKER_48291"
+            answer_marker = "CLEGR_ANSWER_MARKER_73916"
+            # Render the native inference prompt.
+            inference_prompt = self.tokenizer.apply_chat_template(
+                [
+                    {
+                        "role": "user",
+                        "content": content_marker,
+                    }
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+            if inference_prompt.count(content_marker) != 1:
+                raise ValueError(
+                    f"Could not safely locate user content inside the chat "
+                    f"template for {self.model_name}."
+                )
+
+            user_prefix, user_suffix = inference_prompt.split(
+                content_marker,
+                1,
+            )
+            # Render a complete training conversation so we can obtain the
+            # model-native ending after an assistant answer.
+            training_prompt = self.tokenizer.apply_chat_template(
+                [
+                    {
+                        "role": "user",
+                        "content": content_marker,
+                    },
+                    {
+                        "role": "assistant",
+                        "content": answer_marker,
+                    },
+                ],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+
+            if training_prompt.count(answer_marker) != 1:
+                raise ValueError(
+                    f"Could not safely locate assistant content inside the chat "
+                    f"template for {self.model_name}."
+                )
+
+            _, answer_suffix = training_prompt.split(
+                answer_marker,
+                1,
+            )
+
+            return user_prefix, user_suffix, answer_suffix
+        # ------------------------------------------------------------------
+        # Base causal LMs with no chat template, e.g. Phi-1.5
+        # ------------------------------------------------------------------
+        # Use the model's real BOS token if one exists.
+        user_prefix = self.tokenizer.bos_token or ""
+        # Plain completion-style interface.
+        #
+        # The graph embeddings will appear immediately after the prefix:
+        #
+        #   BOS
+        #   [GRAPH TOKENS]
+        #   question
+        #   \nAnswer:
+        #
+        # This is much more appropriate for a base causal LM than fake [INST]
+        # tokens belonging to another model family.
+        user_suffix = "\nAnswer:"
+
+        # End the supervised target with the model's actual EOS token.
+        answer_suffix = self.tokenizer.eos_token or ""
+
+        return user_prefix, user_suffix, answer_suffix
+
     def _encode_inputs(
         self,
         question: List[str],
         context: Optional[List[str]] = None,
     ) -> tuple:
-        batch_size = len(question)
-        questions = self.tokenizer(question, add_special_tokens=False)
-        if context is not None:
-            context = self.tokenizer(context, add_special_tokens=False)
 
-        eos_user_tokens = self.tokenizer(EOS_USER, add_special_tokens=False)
-        bos_token = self.tokenizer(
-            BOS,
+        batch_size = len(question)
+
+        questions = self.tokenizer(
+            question,
             add_special_tokens=False,
-            return_tensors='pt',
+        )
+
+        if context is not None:
+            context = self.tokenizer(
+                context,
+                add_special_tokens=False,
+            )
+
+        user_suffix_tokens = self.tokenizer(
+            self.user_suffix,
+            add_special_tokens=False,
+        )
+
+        prefix_tokens = self.tokenizer(
+            self.user_prefix,
+            add_special_tokens=False,
+            return_tensors="pt",
         ).input_ids[0].to(self.device)
-        bos_embeds = self.word_embedding(bos_token)
-        pad_token = torch.tensor(self.tokenizer.pad_token_id,
-                                 device=self.device)
-        pad_embeds = self.word_embedding(pad_token).unsqueeze(0)
-        return (batch_size, questions, context, eos_user_tokens, bos_embeds,
-                pad_embeds)
+
+        if len(prefix_tokens) > 0:
+            prefix_embeds = self.word_embedding(prefix_tokens)
+        else:
+            prefix_embeds = torch.empty(
+                (0, self.word_embedding.embedding_dim),
+                device=self.device,
+                dtype=self.word_embedding.weight.dtype,
+            )
+
+        pad_token = torch.tensor(
+            self.tokenizer.pad_token_id,
+            device=self.device,
+        )
+
+        pad_embeds = self.word_embedding(
+            pad_token
+        ).unsqueeze(0)
+
+        return (
+            batch_size,
+            questions,
+            context,
+            user_suffix_tokens,
+            prefix_embeds,
+            pad_embeds,
+        )
 
     def _label_input_ids(
         self,
@@ -123,31 +278,45 @@ class LLM(torch.nn.Module):
         i: int,
         context: BatchEncoding,
         question: BatchEncoding,
-        eos_user_tokens: BatchEncoding,
+        user_suffix_tokens: BatchEncoding,
     ) -> List[int]:
+
         input_ids: List[int] = []
+
         if context is not None:
             input_ids += context.input_ids[i][:MAX_TXT_LEN]
+
         input_ids += question.input_ids[i]
-        input_ids += eos_user_tokens.input_ids
+        input_ids += user_suffix_tokens.input_ids
+
         return input_ids
 
     def _inputs_embeds(
         self,
         i: int,
         input_ids: List[int],
-        bos_embeds: Tensor,
+        prefix_embeds: Tensor,
         embedding: Optional[List[Tensor]] = None,
     ) -> Tensor:
-        inputs_embeds = self.word_embedding(
-            torch.tensor(input_ids, device=self.device))
 
-        to_cat = [bos_embeds]
+        inputs_embeds = self.word_embedding(
+            torch.tensor(
+                input_ids,
+                device=self.device,
+            )
+        )
+
+        to_cat = [prefix_embeds]
+
         if embedding is not None and embedding[i] is not None:
             to_cat.append(embedding[i])
+
         to_cat.append(inputs_embeds)
-        
-        return torch.cat(to_cat, dim=0).to(self.device)
+
+        return torch.cat(
+            to_cat,
+            dim=0,
+        ).to(self.device)
 
     def _append_embeds(
         self,
@@ -200,8 +369,17 @@ class LLM(torch.nn.Module):
         answer: Optional[List[str]] = None,
         modifier: Optional[Modifier] = None,
     ) -> tuple:
-        (batch_size, question, context, eos_user_tokens, bos_embeds,
-         pad_embeds) = self._encode_inputs(question, context)
+        (
+            batch_size,
+            question,
+            context,
+            user_suffix_tokens,
+            prefix_embeds,
+            pad_embeds,
+        ) = self._encode_inputs(
+            question,
+            context,
+        )
         
         # Apply the modifier
         if modifier is not None:
@@ -210,21 +388,20 @@ class LLM(torch.nn.Module):
         batch_label_input_ids = None
         if answer is not None:
             label = self.tokenizer(answer, add_special_tokens=False)
-            eos_tokens = self.tokenizer(EOS, add_special_tokens=False)
+            answer_suffix_tokens = self.tokenizer(self.answer_suffix,add_special_tokens=False,)
             batch_label_input_ids = []
 
         batch_inputs_embeds = []
         batch_attention_mask = []
         for i in range(batch_size):
-            input_ids = self._input_ids(i, context, question, eos_user_tokens)
+            input_ids = self._input_ids(i, context, question, user_suffix_tokens)
             if answer is not None:
-                label_input_ids = self._label_input_ids(i, label, eos_tokens)
+                label_input_ids = self._label_input_ids(i,label,answer_suffix_tokens,)                
                 input_ids += label_input_ids
             else:
                 label_input_ids = None
 
-            inputs_embeds = self._inputs_embeds(i, input_ids, bos_embeds,
-                                                embedding)
+            inputs_embeds = self._inputs_embeds(i, input_ids, prefix_embeds,embedding)
 
             (
                 batch_inputs_embeds,
@@ -300,21 +477,47 @@ class LLM(torch.nn.Module):
         inputs_embeds, attention_mask, _ = self._get_embeds(
             question, context, embedding)
 
-        bos_token = self.tokenizer(
-            BOS,
-            add_special_tokens=False,
-        ).input_ids[0]
+        generation_eos_ids = self._generation_eos_token_ids()
+        generation_kwargs = {
+            "inputs_embeds": inputs_embeds,
+            "max_new_tokens": max_tokens,
+            "attention_mask": attention_mask,
+            "use_cache": True,
+            "pad_token_id": self.tokenizer.pad_token_id,
+        }
+
+        if generation_eos_ids is not None:
+            generation_kwargs["eos_token_id"] = generation_eos_ids
 
         with self.autocast_context:
             outputs = self.llm.generate(
-                inputs_embeds=inputs_embeds,
-                bos_token_id=bos_token,
-                max_new_tokens=max_tokens,
-                attention_mask=attention_mask,
-                use_cache=True,
+                **generation_kwargs
             )
 
         return self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({self.model_name})'
+
+    def _generation_eos_token_ids(self) -> Optional[List[int]]:
+        eos_ids = []
+
+        if self.tokenizer.eos_token_id is not None:
+            eos_ids.append(self.tokenizer.eos_token_id)
+
+        # For chat models, answer_suffix usually begins with the native
+        # end-of-turn control token.
+        if self.tokenizer.chat_template is not None and self.answer_suffix:
+            suffix_ids = self.tokenizer(
+                self.answer_suffix,
+                add_special_tokens=False,
+            ).input_ids
+            if suffix_ids:
+                eos_ids.append(suffix_ids[0])
+
+        eos_ids = list(dict.fromkeys(eos_ids))
+
+        if not eos_ids:
+            return None
+
+        return eos_ids
