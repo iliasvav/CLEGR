@@ -17,7 +17,7 @@ ROOT = "datasets"
 METHOD = "tea-glm"
 
 # Change this between phi-1.5 and phi-3.5
-LLM_NAME = "phi-1.5"
+LLM_NAME = "phi-1_5"
 
 PRETRAIN_PATH = f"models/{METHOD}/pretrain_{DATASET}_seed_{SEED}"
 
