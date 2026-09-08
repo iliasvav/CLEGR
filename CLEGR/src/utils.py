@@ -162,13 +162,21 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
     )
     remove_hook_from_module(llm, recurse=True)
 
-    glm = get_glm(method=FLAGS.method)(
+    glm_kwargs = dict(
         llm=llm,
         projector_out_channels=llm.llm.config.hidden_size,
         n_gnn_toks=FLAGS.n_gnn_toks,
         pretrain_path=f"{FLAGS.save_dir}/{FLAGS.method}/pretrain_{FLAGS.dataset}_seed_{FLAGS.seed}",
-        use_lora=use_lora
+        use_lora=use_lora,
     )
+
+    if FLAGS.method == "tea-glm":
+        glm_kwargs.update(
+            shuffle_graph_tokens=FLAGS.shuffle_graph_tokens,
+            shuffle_seed=FLAGS.shuffle_graph_seed,
+        )
+
+    glm = get_glm(method=FLAGS.method)(**glm_kwargs)
 
     # Freeze LLM parameters.
     for name, param in glm.llm.named_parameters():

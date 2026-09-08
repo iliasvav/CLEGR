@@ -117,6 +117,9 @@ flags.DEFINE_string("context_mode", "full", "Context ablation mode: full, no_tit
 
 flags.DEFINE_enum("eval_mode", "generation", ["generation", "label_scoring"], "Evaluation mode.")
 
+flags.DEFINE_bool("shuffle_graph_tokens", False, "Shuffle node-level GNN representations before the projector for diagnostic evaluation.",)
+flags.DEFINE_integer("shuffle_graph_seed", 42, "Random seed used for graph-token shuffling.",)
+
 def get_candidate_labels(dataset):
     labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
     logging.info("Found %d candidate labels: %s", len(labels), labels)

@@ -31,7 +31,11 @@ class TEA_GLM(BaseGLM):
         use_lora: bool = False,
         n_gnn_toks: int = 1,
         pretrain_path: str = None,
+        shuffle_graph_tokens: bool = False,
+        shuffle_seed: int = 42,
     ) -> None:
+        self.shuffle_graph_tokens = shuffle_graph_tokens
+        self.shuffle_seed = shuffle_seed
         llm_name = os.path.basename(llm.model_name)
         with open(f"{pretrain_path}_{llm_name}_model_params.json", "r") as f:
             param_dict = json.load(f)
@@ -59,7 +63,23 @@ class TEA_GLM(BaseGLM):
         ).to(self.llm.device)
 
     def encode_graph(self, data):
-        return self.gnn(data.x, data.edge_index, batch=data.batch)
+        x = self.gnn(data.x, data.edge_index, batch=data.batch)
+        if self.shuffle_graph_tokens:
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(self.shuffle_seed)
+            perm = torch.randperm(
+                x.size(0),
+                generator=generator,
+                device="cpu",
+            ).to(x.device)
+            x = x[perm]
+            if not hasattr(self, "_shuffle_message_printed"):
+                print(
+                    f"[TEA diagnostic] Shuffling GNN node representations "
+                    f"with seed={self.shuffle_seed}"
+                )
+                self._shuffle_message_printed = True
+        return x
 
     def forward(
         self,
