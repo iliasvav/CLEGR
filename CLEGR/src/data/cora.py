@@ -258,8 +258,7 @@ class CoraDataset(BaseDataset):
             "the following subcategories and nothing else: "
             "theory, reinforcement learning, genetic algorithms, "
             "neural networks, probabilistic methods, case based, "
-            "rule learning.\n"
-            "Answer: "
+            "rule learning."
         )
 
         # -----------------------------------------------------
