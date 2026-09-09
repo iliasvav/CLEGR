@@ -32,7 +32,7 @@ class LLM(torch.nn.Module):
         self,
         model_name: str,
         num_params: int,
-        dtype=torch.bfloat16,
+        dtype=torch.float16,
     ) -> None:
         super().__init__()
 

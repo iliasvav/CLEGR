@@ -41,7 +41,7 @@ class BaseGLM(torch.nn.Module):
             from peft import (
                 LoraConfig,
                 get_peft_model,
-                #prepare_model_for_kbit_training,
+                prepare_model_for_kbit_training,
             )
 
             target_modules = set()
@@ -56,8 +56,12 @@ class BaseGLM(torch.nn.Module):
             if len(final_targets) == 0:
                 final_targets = ["q_proj", "v_proj"]  
             print(f"LoRA targets: {final_targets}")
-            if hasattr(self.llm_generator, "gradient_checkpointing_enable"):
-                self.llm_generator.gradient_checkpointing_enable()
+            self.llm_generator = (
+                prepare_model_for_kbit_training(
+                    self.llm_generator,
+                    use_gradient_checkpointing=True,
+                )
+            )
             config = LoraConfig(
                 r=8,
                 lora_alpha=16,
@@ -67,6 +71,7 @@ class BaseGLM(torch.nn.Module):
                 task_type="CAUSAL_LM",
             )
             self.llm_generator = get_peft_model(self.llm_generator, config)
+            self.llm_generator.print_trainable_parameters()
             """
             self.llm_generator = prepare_model_for_kbit_training(self.llm_generator)
             lora_r: int = 8
