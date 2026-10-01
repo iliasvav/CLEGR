@@ -884,9 +884,9 @@ def main(argv):
     # Load dataset
     try:
         dataset = load_dataset(FLAGS.root)
-    except Exception as e:
-        logging.error("Failed to load dataset: %s", e)
-        return
+    except Exception:
+        logging.exception("Failed to load dataset")
+        raise
 
     logging.info("Dataset details: %s", dataset)
     try:
