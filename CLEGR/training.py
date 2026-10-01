@@ -13,6 +13,8 @@ from lightning.pytorch.callbacks import (
     Callback,
 )
 from lightning.pytorch.strategies import DDPStrategy
+import json
+import statistics
 
 # Import project modules
 from src.data.evaluators import get_evaluator, DatasetEvaluator
@@ -125,34 +127,176 @@ def get_candidate_labels(dataset):
     logging.info("Found %d candidate labels: %s", len(labels), labels)
     return labels
 
-def evaluate_label_scoring(model: BaseGLM, loader, evaluator: DatasetEvaluator, candidate_labels, graph_data=None, output_path=None,):
+def evaluate_label_scoring(
+    model: BaseGLM,
+    loader,
+    evaluator: DatasetEvaluator,
+    candidate_labels,
+    graph_data=None,
+    output_path=None,
+):
     model.eval()
-    graph_data = graph_data.to(model.llm.device) if graph_data else None
+
+    graph_data = (
+        graph_data.to(model.llm.device)
+        if graph_data
+        else None
+    )
+
     num_samples = (
         min(len(loader.dataset), FLAGS.max_samples)
         if FLAGS.max_samples > 0
         else len(loader.dataset)
     )
-    logging.info("Evaluating with label scoring on %d samples", num_samples)
+
+    logging.info(
+        "Evaluating with label scoring on %d samples",
+        num_samples,
+    )
+
+    score_records = []
+
     with torch.no_grad():
-        for i, data in tqdm(enumerate(loader), desc="Label scoring", total=num_samples):
+        for i, data in tqdm(
+            enumerate(loader),
+            desc="Label scoring",
+            total=num_samples,
+        ):
             if i >= num_samples:
                 break
+
             data = data.to(model.llm.device)
+
             true_label = data.label
+
+            if isinstance(true_label, list):
+                gt_string = str(true_label[0]).strip()
+            else:
+                gt_string = str(true_label).strip()
+
             scores = {}
+
             for candidate in candidate_labels:
                 data.label = [candidate]
+
                 loss = model(
                     data,
                     graph_data=graph_data,
                 )
+
                 scores[candidate] = float(loss.item())
+
             data.label = true_label
-            best_label = min(scores, key=scores.get)
+
+            ranked = sorted(
+                scores.items(),
+                key=lambda x: x[1],
+            )
+
+            best_label, best_score = ranked[0]
+
+            if len(ranked) > 1:
+                second_label, second_score = ranked[1]
+                score_margin = second_score - best_score
+            else:
+                second_label = None
+                second_score = None
+                score_margin = None
+
             evaluator(data, best_label)
+
+            # Recover a useful sample identifier if available.
+            sample_id = None
+
+            if hasattr(data, "node_id"):
+                sample_id = data.node_id
+            elif hasattr(data, "id"):
+                sample_id = data.id
+
+            if torch.is_tensor(sample_id):
+                if sample_id.numel() == 1:
+                    sample_id = sample_id.item()
+                else:
+                    sample_id = sample_id.detach().cpu().tolist()
+
+            score_records.append({
+                "sample_index": i,
+                "sample_id": sample_id,
+                "ground_truth": gt_string,
+                "prediction": best_label,
+                "correct": best_label == gt_string,
+
+                "best_score": best_score,
+                "runner_up": second_label,
+                "runner_up_score": second_score,
+                "score_margin": score_margin,
+
+                "candidate_scores": scores,
+            })
+
     metrics = evaluator.compute_metrics()
-    evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
+
+    classification_diagnostics = (
+        evaluator.compute_classification_diagnostics()
+    )
+
+    margins = [
+        record["score_margin"]
+        for record in score_records
+        if record["score_margin"] is not None
+    ]
+
+    best_scores = [
+        record["best_score"]
+        for record in score_records
+    ]
+
+    scoring_summary = {}
+
+    if margins:
+        scoring_summary.update({
+            "mean_score_margin": float(
+                sum(margins) / len(margins)
+            ),
+            "median_score_margin": float(
+                statistics.median(margins)
+            ),
+            "min_score_margin": float(min(margins)),
+            "max_score_margin": float(max(margins)),
+        })
+
+    if best_scores:
+        scoring_summary.update({
+            "mean_winning_score": float(
+                sum(best_scores) / len(best_scores)
+            ),
+            "median_winning_score": float(
+                statistics.median(best_scores)
+            ),
+        })
+
+    diagnostics = {
+        "evaluation_mode": "label_scoring",
+        "metrics": metrics,
+        "classification": classification_diagnostics,
+        "scoring_summary": scoring_summary,
+        "samples": score_records,
+    }
+
+    # Add useful scalar summaries to normal logs/W&B.
+    metrics.update(scoring_summary)
+
+    evaluator.log_raw(
+        output_path
+        if output_path is not None
+        else "logs/output.csv"
+    )
+
+    save_diagnostics(
+        diagnostics,
+        output_path,
+    )
+
     return metrics
 
 def build_shuffled_context_map(dataset, mode="shuffle", seed=42):
@@ -417,6 +561,8 @@ def build_output_csv_path():
     parts = [
         FLAGS.dataset,
         FLAGS.llm_model_name,
+        f"eval-{FLAGS.eval_mode}",
+        f"split-{FLAGS.eval_split}",
         f"context-{FLAGS.context_mode}",
     ]
     if FLAGS.context_perturbation != "none":
@@ -446,6 +592,29 @@ def build_output_csv_path():
     filename = "_".join(parts)
     filename = filename.replace("/", "_")
     return os.path.join("logs", filename + ".csv")
+
+def diagnostics_path_from_output(output_path):
+    if output_path is None:
+        return "logs/diagnostics.json"
+
+    base, _ = os.path.splitext(output_path)
+    return base + "_diagnostics.json"
+
+
+def save_diagnostics(diagnostics, output_path):
+    path = diagnostics_path_from_output(output_path)
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(
+            diagnostics,
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    logging.info("Detailed diagnostics saved to %s", path)
 class EvalEachEpochCallback(Callback):
     def __init__(self, val_loader, dataset_name):
         super().__init__()
@@ -579,31 +748,107 @@ def train_with_lightning(
         logging.info("Saved LoRA adapters to %s", lora_dir)
 
 
-def evaluate(model: BaseGLM, loader, evaluator: DatasetEvaluator, graph_data=None, output_path=None,):
+def evaluate(
+    model: BaseGLM,
+    loader,
+    evaluator: DatasetEvaluator,
+    graph_data=None,
+    output_path=None,
+):
     model.eval()
-    graph_data = graph_data.to(model.llm.device) if graph_data else None
-    max_tok_len = evaluator.max_class_toklen(model.llm.tokenizer)
+
+    graph_data = (
+        graph_data.to(model.llm.device)
+        if graph_data
+        else None
+    )
+
+    max_tok_len = evaluator.max_class_toklen(
+        model.llm.tokenizer
+    )
 
     num_samples = (
         min(len(loader.dataset), FLAGS.max_samples)
         if FLAGS.max_samples > 0
         else len(loader.dataset)
     )
-    logging.info("Evaluating on %d samples", num_samples)
+
+    logging.info(
+        "Evaluating on %d samples",
+        num_samples,
+    )
 
     with torch.no_grad():
-        for i, data in tqdm(enumerate(loader), desc="Evaluating", total=num_samples):
+        for i, data in tqdm(
+            enumerate(loader),
+            desc="Evaluating",
+            total=num_samples,
+        ):
             if i >= num_samples:
                 break
 
             data = data.to(model.llm.device)
+
             out_seq = model.inference(
-                data, max_out_tokens=max_tok_len, graph_data=graph_data, no_graph_token=FLAGS.no_graph_token,
+                data,
+                max_out_tokens=max_tok_len,
+                graph_data=graph_data,
+                no_graph_token=FLAGS.no_graph_token,
             )[0]
+
             evaluator(data, out_seq)
 
+    # Legacy / parsed metrics
     metrics = evaluator.compute_metrics()
-    evaluator.log_raw(output_path if output_path is not None else "logs/output.csv")
+
+    # Generic detailed classification diagnostics
+    diagnostics = {
+        "evaluation_mode": "generation",
+        "parsed_metrics": metrics,
+        "parsed_classification":
+            evaluator.compute_classification_diagnostics(),
+    }
+
+    # Dataset-specific generation diagnostics
+    if hasattr(evaluator, "compute_generation_diagnostics"):
+        generation_diagnostics = (
+            evaluator.compute_generation_diagnostics(
+                tokenizer=model.llm.tokenizer,
+            )
+        )
+
+        diagnostics["generation"] = generation_diagnostics
+
+        # Add the most important scalar diagnostics to metrics so that
+        # they are also printed/logged normally.
+        scalar_keys = [
+            "strict_accuracy",
+            "valid_rate",
+            "malformed_rate",
+            "conditional_valid_accuracy",
+            "strict_macro_precision",
+            "strict_macro_recall",
+            "strict_macro_f1",
+            "strict_weighted_precision",
+            "strict_weighted_recall",
+            "strict_weighted_f1",
+        ]
+
+        for key in scalar_keys:
+            if key in generation_diagnostics:
+                metrics[key] = generation_diagnostics[key]
+
+    evaluator.log_raw(
+        output_path
+        if output_path is not None
+        else "logs/output.csv"
+    )
+
+    save_diagnostics(
+        diagnostics,
+        output_path,
+    )
+
     return metrics
 
 
