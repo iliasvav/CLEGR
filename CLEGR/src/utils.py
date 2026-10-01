@@ -166,7 +166,7 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
         llm=llm,
         projector_out_channels=llm.llm.config.hidden_size,
         n_gnn_toks=FLAGS.n_gnn_toks,
-        pretrain_path=f"{FLAGS.save_dir}/{FLAGS.method}/pretrain_{FLAGS.dataset}_seed_{FLAGS.seed}",
+        pretrain_path=f"{FLAGS.save_dir}/{FLAGS.method}/pretrain_{FLAGS.dataset}_seed_{FLAGS.seed}_{FLAGS.llm_model_name}",
         use_lora=use_lora,
     )
 

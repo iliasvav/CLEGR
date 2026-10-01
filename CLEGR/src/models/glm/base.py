@@ -34,8 +34,10 @@ class BaseGLM(torch.nn.Module):
         self.n_gnn_toks = n_gnn_toks
         self.projector_out_channels = projector_out_channels
         self.projector = None
-        self.EOS_TOKEN_ID = llm.tokenizer("[/s]", add_special_tokens=False).input_ids[0]
-        self.LLM_EOS_TOKEN_ID = llm.tokenizer.eos_token_id
+        generation_eos_ids = self.llm._generation_eos_token_ids()
+        self.GENERATION_EOS_TOKEN_IDS = set(generation_eos_ids or [])
+        #self.EOS_TOKEN_ID = llm.tokenizer("[/s]", add_special_tokens=False).input_ids[0]
+        #self.LLM_EOS_TOKEN_ID = llm.tokenizer.eos_token_id
 
         if use_lora:
             from peft import (
@@ -215,13 +217,16 @@ class BaseGLM(torch.nn.Module):
         next_token_logits = outputs.logits[:, -1, :]
         next_token_id = next_token_logits.argmax(dim=-1, keepdim=True)
 
-        generated_tokens = [next_token_id]
+        generated_tokens = []
 
-        # For subsequent iterations, only process the newly generated token.
-        current_token_embedding = embedding_layer(next_token_id)
-
-        # Loop from 1 to max tokens.
-        for _ in range(1, max_length):
+        for step in range(max_length):
+            token_id = next_token_id.item()
+            if token_id in self.GENERATION_EOS_TOKEN_IDS:
+                break
+            generated_tokens.append(next_token_id)
+            if step == max_length - 1:
+                break
+            current_token_embedding = embedding_layer(next_token_id)
             outputs = self.llm_generator(
                 inputs_embeds=current_token_embedding,
                 attention_mask=attention_mask,
@@ -232,23 +237,10 @@ class BaseGLM(torch.nn.Module):
             next_token_logits = outputs.logits[:, -1, :]
             next_token_id = next_token_logits.argmax(dim=-1, keepdim=True)
 
-            # check if the next token is the end of sequence token
-            if (
-                next_token_id.item() == self.EOS_TOKEN_ID
-                or next_token_id.item() == self.LLM_EOS_TOKEN_ID
-            ):
-                break
-            generated_tokens.append(next_token_id)
-
-            # Get embedding for next token.
-            current_token_embedding = embedding_layer(next_token_id)
-
-        # Concatenate generated token ids.
-        generated_sequence = torch.cat(generated_tokens, dim=1)
-
-        logging.debug(f"Number of generated tokens: {len(generated_tokens)}")
-
-        return generated_sequence
+        logging.debug("Number of generated tokens: %d", len(generated_tokens),)
+        if not generated_tokens:
+            return torch.empty((inputs_embeds.size(0), 0), dtype=torch.long, device=inputs_embeds.device)
+        return torch.cat(generated_tokens, dim=1)
 
     def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
         # if "llama" in self.llm.model_name.lower():

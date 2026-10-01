@@ -3,5 +3,6 @@
     "phi-3.5": "microsoft/Phi-3.5-mini-instruct",
     "phi-4": "microsoft/phi-4",
     "llama-3-8b": "meta-llama/Meta-Llama-3-8B-Instruct",
-    "qwen-2.5": "Qwen/Qwen2.5-3B-Instruct"
+    "qwen-2.5": "Qwen/Qwen2.5-3B-Instruct",
+    "qwen2.5-1.5b": "Qwen/Qwen2.5-1.5B-Instruct"
 }

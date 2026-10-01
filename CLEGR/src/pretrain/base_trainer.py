@@ -21,8 +21,7 @@ class GNNTrainer:
         self.task_level = task_level
         self.FLAGS = FLAGS
         self.param_dict = param_dict
-
-        self.save_name = f"{self.FLAGS.save_dir}/{self.FLAGS.method}/pretrain_{self.FLAGS.dataset}_seed_{self.FLAGS.seed}"
+        self.save_name = f"{self.FLAGS.save_dir}/{self.FLAGS.method}/pretrain_{self.FLAGS.dataset}_seed_{self.FLAGS.seed}_{self.FLAGS.llm_model_name}"
         self.params_path = f"{self.save_name}_model_params.json"
         self.model_path = f"{self.save_name}_model.pth"
 

@@ -92,8 +92,8 @@ class TEAGLMTrainer(GNNTrainer):
         model = GraphSAGE(**param_dict).to(device, dtype=torch.float)
         super().__init__(model, self.dataset, device, task_level, FLAGS, param_dict)
 
-        self.params_path = f"{self.save_name}_{self.llm_str}_model_params.json"
-        self.model_path = f"{self.save_name}_{self.llm_str}_model.pth"
+        self.params_path = f"{self.save_name}_model_params.json"
+        self.model_path = f"{self.save_name}_model.pth"
 
         if self.use_tp:
             self.criterion = ContrastiveLoss(self.tau, self_tp=self.self_tp).to(device)

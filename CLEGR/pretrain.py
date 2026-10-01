@@ -16,7 +16,7 @@ flags.DEFINE_string(
     "Dataset name. Use 'cora' for node classification or e.g., 'mutag' for graph classification",
 )
 flags.DEFINE_string(
-    "llm_model_name", "microsoft/Phi-3.5-mini-instruct", "Name of the LLM model to use."
+    "llm_model_name", "phi-3.5", "Name of the LLM model to use."
 )
 flags.DEFINE_string("save_dir", "models", "Directory to save the model checkpoints")
 flags.DEFINE_integer("num_layers", 3, "Number of layers in the GNN")

@@ -33,18 +33,21 @@ class TEA_GLM(BaseGLM):
         pretrain_path: str = None,
         shuffle_graph_tokens: bool = False,
         shuffle_seed: int = 42,
+        pretrain_llm_name: str = None,
     ) -> None:
         self.shuffle_graph_tokens = shuffle_graph_tokens
         self.shuffle_seed = shuffle_seed
-        llm_name = os.path.basename(llm.model_name)
-        with open(f"{pretrain_path}_{llm_name}_model_params.json", "r") as f:
+        llm_name = (
+            pretrain_llm_name if pretrain_llm_name is not None else os.path.basename(llm.model_name)
+        )
+        with open(f"{pretrain_path}_model_params.json", "r") as f:
             param_dict = json.load(f)
 
         gnn = GraphSAGE(**param_dict).to(llm.device)
         # load state dict
 
         state_dict = torch.load(
-            f"{pretrain_path}_{llm_name}_model.pth", weights_only=False
+            f"{pretrain_path}_model.pth", weights_only=False
         )
         gnn.load_state_dict(state_dict)
 
