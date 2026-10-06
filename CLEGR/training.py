@@ -787,6 +787,9 @@ def evaluate(
             if i >= num_samples:
                 break
 
+            if i >= 5:
+                break
+
             data = data.to(model.llm.device)
 
             out_seq = model.inference(

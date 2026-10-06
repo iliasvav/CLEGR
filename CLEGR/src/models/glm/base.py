@@ -203,10 +203,128 @@ class BaseGLM(torch.nn.Module):
         return con
 
     def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
-        # Cache the embedding layer outside the loop.
         embedding_layer = self.llm_generator.get_input_embeddings()
 
-        # First forward pass with full input embeddings.
+        # First forward pass using the complete multimodal prompt.
+        outputs = self.llm_generator(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            past_key_values=None,
+            use_cache=True,
+        )
+
+        past_key_values = outputs.past_key_values
+        next_token_logits = outputs.logits[:, -1, :]
+        next_token_id = next_token_logits.argmax(dim=-1, keepdim=True)
+
+        generated_tokens = []
+
+        print("\n" + "=" * 70)
+        print("GENERATION DEBUG")
+        print("max_length:", max_length)
+        print("initial inputs_embeds shape:", tuple(inputs_embeds.shape))
+        print("initial attention_mask shape:", tuple(attention_mask.shape))
+        print("EOS ids:", self.GENERATION_EOS_TOKEN_IDS)
+        print("tokenizer eos_token:", repr(self.llm.tokenizer.eos_token))
+        print("tokenizer eos_token_id:", self.llm.tokenizer.eos_token_id)
+
+        for step in range(max_length):
+            token_id = next_token_id.item()
+
+            token_text = self.llm.tokenizer.decode(
+                [token_id],
+                skip_special_tokens=False,
+            )
+
+            # Also inspect the most likely alternatives.
+            probs = torch.softmax(next_token_logits.float(), dim=-1)
+            top_probs, top_ids = torch.topk(probs, k=5, dim=-1)
+
+            print(f"\nSTEP {step}")
+            print(
+                f"chosen: id={token_id}, "
+                f"text={repr(token_text)}, "
+                f"is_eos={token_id in self.GENERATION_EOS_TOKEN_IDS}"
+            )
+
+            print("top-5:")
+            for rank in range(5):
+                candidate_id = top_ids[0, rank].item()
+                candidate_prob = top_probs[0, rank].item()
+                candidate_text = self.llm.tokenizer.decode(
+                    [candidate_id],
+                    skip_special_tokens=False,
+                )
+
+                print(
+                    f"  {rank + 1}. "
+                    f"id={candidate_id:<7} "
+                    f"p={candidate_prob:.6f} "
+                    f"text={repr(candidate_text)} "
+                    f"EOS={candidate_id in self.GENERATION_EOS_TOKEN_IDS}"
+                )
+
+            if token_id in self.GENERATION_EOS_TOKEN_IDS:
+                print(">>> STOP REASON: EOS")
+                break
+
+            generated_tokens.append(next_token_id)
+
+            if step == max_length - 1:
+                print(">>> STOP REASON: max_length")
+                break
+
+            current_token_embedding = embedding_layer(next_token_id)
+
+            outputs = self.llm_generator(
+                inputs_embeds=current_token_embedding,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+
+            past_key_values = outputs.past_key_values
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token_id = next_token_logits.argmax(dim=-1, keepdim=True)
+
+        if generated_tokens:
+            complete_ids = torch.cat(generated_tokens, dim=1)
+
+            print(
+                "\nCOMPLETE GENERATED IDS:",
+                complete_ids[0].tolist()
+            )
+            print(
+                "COMPLETE GENERATED TEXT:",
+                repr(
+                    self.llm.tokenizer.decode(
+                        complete_ids[0],
+                        skip_special_tokens=False,
+                    )
+                )
+            )
+        else:
+            print("\nNO NON-EOS TOKENS GENERATED")
+
+        print("=" * 70 + "\n")
+
+        logging.debug(
+            "Number of generated tokens: %d",
+            len(generated_tokens),
+        )
+
+        if not generated_tokens:
+            return torch.empty(
+                (inputs_embeds.size(0), 0),
+                dtype=torch.long,
+                device=inputs_embeds.device,
+            )
+
+        return torch.cat(generated_tokens, dim=1)
+
+    """def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
+        embedding_layer = self.llm_generator.get_input_embeddings()
+
         outputs = self.llm_generator(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -240,7 +358,7 @@ class BaseGLM(torch.nn.Module):
         logging.debug("Number of generated tokens: %d", len(generated_tokens),)
         if not generated_tokens:
             return torch.empty((inputs_embeds.size(0), 0), dtype=torch.long, device=inputs_embeds.device)
-        return torch.cat(generated_tokens, dim=1)
+        return torch.cat(generated_tokens, dim=1)"""
 
     def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
         # if "llama" in self.llm.model_name.lower():
