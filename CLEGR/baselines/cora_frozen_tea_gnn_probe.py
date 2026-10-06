@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 
@@ -16,19 +17,33 @@ DATASET = "cora"
 ROOT = "datasets"
 METHOD = "tea-glm"
 
-# Change this between phi-1.5 and phi-3.5
-LLM_NAME = "phi-1_5"
-
 PRETRAIN_PATH = f"models/{METHOD}/pretrain_{DATASET}_seed_{SEED}"
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Linear probe on frozen TEA-pretrained GraphSAGE representations."
+    )
+    parser.add_argument(
+        "--llm_model_name",
+        type=str,
+        required=True,
+        help="LLM name used for TEA pretraining, e.g. phi-1_5 or qwen2.5-1.5b",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    llm_name = args.llm_model_name
+
     torch.manual_seed(SEED)
     np.random.seed(SEED)
 
     print("=" * 70)
     print("Frozen TEA-GNN linear probe")
     print("=" * 70)
+    print("LLM-conditioned TEA pretraining:", llm_name)
 
     # ------------------------------------------------------------
     # 1. Load the exact same Cora dataset used by training.py
@@ -61,7 +76,7 @@ def main():
     # ------------------------------------------------------------
     # 3. Load the exact TEA-pretrained GraphSAGE
     # ------------------------------------------------------------
-    llm_name_for_file = os.path.basename(LLM_NAME)
+    llm_name_for_file = os.path.basename(llm_name)
 
     params_path = (
         f"{PRETRAIN_PATH}_{llm_name_for_file}_model_params.json"
@@ -111,7 +126,6 @@ def main():
     print("z shape:", tuple(z.shape))
     print("z dtype:", z.dtype)
 
-    # Basic sanity checks
     print("NaNs:", torch.isnan(z).sum().item())
     print("Infs:", torch.isinf(z).sum().item())
     print(
@@ -134,7 +148,7 @@ def main():
     y_test = y[test_ids.numpy()]
 
     # ------------------------------------------------------------
-    # 6. Linear probe
+    # 6. Identical linear probe for every TEA backbone
     # ------------------------------------------------------------
     clf = LogisticRegression(
         max_iter=5000,
@@ -154,6 +168,8 @@ def main():
     print("\n" + "=" * 70)
     print("RESULTS")
     print("=" * 70)
+    print(f"TEA backbone:   {llm_name}")
+    print(f"Representation: {z.shape[1]} dimensions")
     print(f"Train accuracy: {train_acc:.6f}")
     print(f"Val accuracy:   {val_acc:.6f}")
     print(f"Test accuracy:  {test_acc:.6f}")
