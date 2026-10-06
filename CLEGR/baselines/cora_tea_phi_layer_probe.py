@@ -4,7 +4,7 @@ import random
 import numpy as np
 import pandas as pd
 import torch
-
+import argparse
 from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import accuracy_score
 from torch_geometric.loader import DataLoader
@@ -22,14 +22,22 @@ FLAGS = training.FLAGS
 
 METHOD = "tea-glm"
 DATASET = "cora"
-LLM_MODEL = "phi-1.5"
 SEED = 0
 
 BATCH_SIZE = 1
 NUM_WORKERS = 0
 
-RESULTS_PATH = "logs/cora_tea_phi_layer_probe.csv"
-
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Layer-wise representation probe for Cora TEA-GLM."
+    )
+    parser.add_argument(
+        "--llm_model_name",
+        type=str,
+        required=True,
+        choices=["phi-1.5", "qwen2.5-1.5b"],
+    )
+    return parser.parse_args()
 
 # ============================================================
 # Reproducibility
@@ -149,7 +157,7 @@ def extract_layer_representations(
     dataset,
 ):
     """
-    Extract two representations from every Phi hidden-state level.
+    Extract two representations from every LLM hidden-state level.
 
     1. graph_mean
        Mean pooling over the 10 continuous graph-token positions.
@@ -234,7 +242,9 @@ def extract_layer_representations(
 
     print()
     print("=" * 72)
-    print("EXTRACTING PHI HIDDEN STATES")
+    print(
+        f"EXTRACTING {FLAGS.llm_model_name} HIDDEN STATES"
+    )
     print("=" * 72)
 
     for sample_idx, data in tqdm(
@@ -446,10 +456,6 @@ def extract_layer_representations(
                 < 1e-4
             )
 
-        # ----------------------------------------------------
-        # Phi forward pass with hidden states
-        # ----------------------------------------------------
-
         with glm.llm.autocast_context:
 
             outputs = glm.llm_generator(
@@ -599,6 +605,7 @@ def run_layer_probes(
     train_ids,
     val_ids,
     test_ids,
+    results_path,
 ):
     """
     Fit one Ridge linear probe for every hidden-state level
@@ -607,7 +614,7 @@ def run_layer_probes(
 
     os.makedirs(
         os.path.dirname(
-            RESULTS_PATH
+            results_path
         ),
         exist_ok=True,
     )
@@ -693,7 +700,7 @@ def run_layer_probes(
             pd.DataFrame(
                 results
             ).to_csv(
-                RESULTS_PATH,
+                results_path,
                 index=False,
             )
 
@@ -708,6 +715,7 @@ def run_layer_probes(
 
 def print_summary(
     results_df,
+    results_path
 ):
     print()
     print("=" * 72)
@@ -769,7 +777,7 @@ def print_summary(
     print()
     print(
         "Saved results to:",
-        RESULTS_PATH,
+        results_path,
     )
 
 
@@ -778,20 +786,22 @@ def print_summary(
 # ============================================================
 
 def main():
+    args = parse_args()
 
+    llm_model = args.llm_model_name
+
+    results_path = (
+        f"logs/cora_tea_{llm_model}_layer_probe.csv"
+    )
     seed_everything(
         SEED
     )
-
-    # --------------------------------------------------------
-    # Exact current clean TEA + Phi-1.5 evaluation setup
-    # --------------------------------------------------------
 
     FLAGS([
         "cora_tea_phi_layer_probe.py",
         f"--method={METHOD}",
         f"--dataset={DATASET}",
-        f"--llm_model_name={LLM_MODEL}",
+        f"--llm_model_name={llm_model}",
         "--evaluate",
         "--use_lora",
         f"--seed={SEED}",
@@ -802,7 +812,8 @@ def main():
 
     print()
     print("=" * 72)
-    print("CORA TEA-PHI LAYER-WISE PROBE")
+    print("CORA TEA-GLM LAYER-WISE PROBE")
+    print("Backbone:", llm_model)
     print("=" * 72)
 
     print(
@@ -1093,10 +1104,6 @@ def main():
 
     del checkpoint
 
-    # --------------------------------------------------------
-    # Load trained Phi-1.5 LoRA adapter
-    # --------------------------------------------------------
-
     lora_dir = os.path.join(
         FLAGS.save_dir,
         FLAGS.method,
@@ -1171,10 +1178,6 @@ def main():
 
     glm.eval()
 
-    # --------------------------------------------------------
-    # Extract all Phi hidden-state representations
-    # --------------------------------------------------------
-
     (
         graph_mean_all,
         answer_position_all,
@@ -1184,10 +1187,6 @@ def main():
         graph_data=dataset.graph_data,
         dataset=dataset,
     )
-
-    # --------------------------------------------------------
-    # Phi/GNN/projector are no longer required
-    # --------------------------------------------------------
 
     del lm_module
     del model
@@ -1212,6 +1211,7 @@ def main():
             train_ids=train_ids,
             val_ids=val_ids,
             test_ids=test_ids,
+            results_path=results_path,
         )
     )
 
@@ -1220,7 +1220,8 @@ def main():
     # --------------------------------------------------------
 
     print_summary(
-        results_df
+        results_df,
+        results_path,
     )
 
 
