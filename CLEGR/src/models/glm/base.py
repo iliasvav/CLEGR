@@ -202,10 +202,9 @@ class BaseGLM(torch.nn.Module):
             con.append(tempcon)
         return con
 
-    def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
+    """def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
         embedding_layer = self.llm_generator.get_input_embeddings()
 
-        # First forward pass using the complete multimodal prompt.
         outputs = self.llm_generator(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -332,9 +331,9 @@ class BaseGLM(torch.nn.Module):
                 device=inputs_embeds.device,
             )
 
-        return torch.cat(generated_tokens, dim=1)
+        return torch.cat(generated_tokens, dim=1)"""
 
-    """def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
+    def _in_house_generate(self, inputs_embeds, attention_mask, max_length):
         embedding_layer = self.llm_generator.get_input_embeddings()
 
         outputs = self.llm_generator(
@@ -381,7 +380,7 @@ class BaseGLM(torch.nn.Module):
         logging.debug("Number of generated tokens: %d", len(generated_tokens),)
         if not generated_tokens:
             return torch.empty((inputs_embeds.size(0), 0), dtype=torch.long, device=inputs_embeds.device)
-        return torch.cat(generated_tokens, dim=1)"""
+        return torch.cat(generated_tokens, dim=1)
 
     def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
         # if "llama" in self.llm.model_name.lower():
