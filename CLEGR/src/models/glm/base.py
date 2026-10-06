@@ -276,6 +276,18 @@ class BaseGLM(torch.nn.Module):
 
             current_token_embedding = embedding_layer(next_token_id)
 
+            attention_mask = torch.cat(
+                [
+                    attention_mask,
+                    torch.ones(
+                        (attention_mask.size(0), 1),
+                        dtype=attention_mask.dtype,
+                        device=attention_mask.device,
+                    ),
+                ],
+                dim=1,
+            )
+
             outputs = self.llm_generator(
                 inputs_embeds=current_token_embedding,
                 attention_mask=attention_mask,
@@ -345,6 +357,17 @@ class BaseGLM(torch.nn.Module):
             if step == max_length - 1:
                 break
             current_token_embedding = embedding_layer(next_token_id)
+            attention_mask = torch.cat(
+                            [
+                                attention_mask,
+                                torch.ones(
+                                    (attention_mask.size(0), 1),
+                                    dtype=attention_mask.dtype,
+                                    device=attention_mask.device,
+                                ),
+                            ],
+                            dim=1,
+                        )
             outputs = self.llm_generator(
                 inputs_embeds=current_token_embedding,
                 attention_mask=attention_mask,
