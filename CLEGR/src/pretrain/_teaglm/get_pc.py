@@ -12,7 +12,7 @@ llm_to_ncomp = {
     "Phi-3.5-mini-instruct": 1000,
     "phi-4": 1000,
     "Qwen2.5-3B-Instruct": 1000,
-    "Qwen2.5-1.5B-Instruct": 1000,
+    "Qwen2.5-1.5B-Instruct": 512,
 }
 
 def get_pc(
@@ -51,7 +51,14 @@ def get_pc(
     #numpy_matrix = llm_embeds.numpy()
     numpy_matrix = llm_embeds.to(torch.float32).numpy()
 
-    pca = PCA(n_components=n_components)
+    #pca = PCA(n_components=n_components)
+    pca = PCA(
+        n_components=n_components,
+        svd_solver="randomized",
+        random_state=0,
+        n_oversamples=10,
+        iterated_power=3,
+    )
     pca.fit(numpy_matrix)
 
     explained_variance_ratio = pca.explained_variance_ratio_
