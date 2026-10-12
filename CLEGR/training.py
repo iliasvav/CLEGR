@@ -122,6 +122,8 @@ flags.DEFINE_enum("eval_mode", "generation", ["generation", "label_scoring"], "E
 flags.DEFINE_bool("shuffle_graph_tokens", False, "Shuffle node-level GNN representations before the projector for diagnostic evaluation.",)
 flags.DEFINE_integer("shuffle_graph_seed", 42, "Random seed used for graph-token shuffling.",)
 
+flags.DEFINE_bool("compact_dataset", False, "Use the compact CLEGR dataset for training and evaluation.")
+
 def get_candidate_labels(dataset):
     labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
     logging.info("Found %d candidate labels: %s", len(labels), labels)

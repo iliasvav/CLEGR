@@ -38,7 +38,15 @@ def load_dataset(root: str, dataset=None) -> BaseDataset:
     """
     dataset_name = dataset if dataset else FLAGS.dataset
     try:
-        dataset = get_dataset(dataset_name)(root=root)
+        if FLAGS.compact_dataset:
+            if dataset_name != "clegr-reasoning":
+                raise ValueError(
+                    "Compact loading is only support for clegr-reasoning."
+                )
+            from src.data.compact_clegr import CompactCLEGRDataset
+            dataset = CompactCLEGRDataset(root=root)
+        else:
+            dataset = get_dataset(dataset_name)(root=root)
         if dataset.type == "node":
             dataset.graph_data.share_memory_()
     except AssertionError as error:
