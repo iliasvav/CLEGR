@@ -6,6 +6,7 @@ from absl import logging, flags
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 import lightning as pl
+from torch.utils.data import Subset
 
 
 # Import project modules
@@ -50,18 +51,16 @@ def load_dataset(root: str, dataset=None) -> BaseDataset:
 
 def split_dataset(dataset, seed: int):
     """Splits the dataset into train, validation, and test subsets.
-
     Args:
         dataset: The complete dataset.
         seed: The random seed.
-
     Returns:
         tuple: train_dataset, val_dataset, test_dataset.
     """
     split = dataset.split(seed=seed)
-    train_dataset = [dataset[i] for i in split["train"]]
-    val_dataset = [dataset[i] for i in split["val"]]
-    test_dataset = [dataset[i] for i in split["test"]]
+    train_dataset = Subset(dataset, split["train"])
+    val_dataset = Subset(dataset, split["val"])
+    test_dataset = Subset(dataset, split["test"])
 
     logging.info(
         "Dataset split into train: %d, validation: %d, test: %d samples.",
@@ -95,7 +94,7 @@ def create_dataloaders(
             batch_size=batch_size,
             shuffle=True,
             num_workers=num_workers,
-            persistent_workers=True,
+            persistent_workers=num_workers > 0,
         )
         if train_dataset is not None
         else None
@@ -106,7 +105,7 @@ def create_dataloaders(
             num_workers=num_workers,
             shuffle=False,
             batch_size=batch_size,
-            persistent_workers=True,
+            persistent_workers=num_workers > 0,
         )
         if val_dataset is not None
         else None
@@ -116,7 +115,7 @@ def create_dataloaders(
             test_dataset,
             num_workers=num_workers,
             shuffle=False,
-            persistent_workers=True,
+            persistent_workers=num_workers > 0,
         )
         if test_dataset is not None
         else None

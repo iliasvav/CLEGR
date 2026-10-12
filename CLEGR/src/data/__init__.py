@@ -16,6 +16,7 @@ from .history import HistoryDataset
 from .photo import PhotoDataset
 from .arxiv import ArxivDataset
 from .arxiv_for_transfer import Arxiv_for_transfer_Dataset
+from .compact_clegr import CompactCLEGRDataset
 
 from .collators import NodeDataLoaderCollator
 
@@ -40,6 +41,7 @@ def get_dataset(dataset_name: str):
         "tiny-clegr-reasoning": TinyCLEGRReasoningDataset,
         "large-clegr-facts": LargeCLEGRFactsDataset,
         "large-clegr-reasoning": LargeCLEGRReasoningDataset,
+        "clegr-reasoning-compact": CompactCLEGRDataset,
     }
 
     if dataset_name not in mapper:
