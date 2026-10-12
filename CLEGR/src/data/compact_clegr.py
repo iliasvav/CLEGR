@@ -53,55 +53,42 @@ class CompactCLEGRDataset(Dataset):
         return data
 
     
-    def split(
-        self,
-        seed,
-        split_ratio=(0.6, 0.2, 0.2),
-        graph_wise=False,
-    ):
+    
+    def split(self, seed, split_ratio=(0.6, 0.2, 0.2)):
+        graph_ids = [
+            record["graph_id"]
+            for record in self.qa_records
+        ]
+
+        unique_graph_ids = np.unique(graph_ids)
+
         rng = np.random.RandomState(seed)
+        shuffled_graph_ids = rng.permutation(unique_graph_ids)
 
-        if not graph_wise:
-            # Original behavior: split individual questions.
-            indices = rng.permutation(len(self))
+        n = len(shuffled_graph_ids)
+        train_end = int(n * split_ratio[0])
+        val_end = int(n * (split_ratio[0] + split_ratio[1]))
 
-            train_end = int(len(self) * split_ratio[0])
-            val_end = int(
-                len(self) * (split_ratio[0] + split_ratio[1])
-            )
+        train_graphs = set(shuffled_graph_ids[:train_end])
+        val_graphs = set(shuffled_graph_ids[train_end:val_end])
+        test_graphs = set(shuffled_graph_ids[val_end:])
 
-            return {
-                "train": indices[:train_end],
-                "val": indices[train_end:val_end],
-                "test": indices[val_end:],
-            }
-
-        graph_ids = list(self.graph_bank.keys())
-        shuffled_graphs = rng.permutation(graph_ids)
-
-        train_end = int(len(graph_ids) * split_ratio[0])
-        val_end = int(
-            len(graph_ids) * (split_ratio[0] + split_ratio[1])
-        )
-
-        train_graphs = set(shuffled_graphs[:train_end])
-        val_graphs = set(shuffled_graphs[train_end:val_end])
-        test_graphs = set(shuffled_graphs[val_end:])
-
-        splits = {"train": [], "val": [], "test": []}
-
-        for idx, record in enumerate(self.qa_records):
-            graph_id = record["graph_id"]
-
-            if graph_id in train_graphs:
-                splits["train"].append(idx)
-            elif graph_id in val_graphs:
-                splits["val"].append(idx)
-            else:
-                assert graph_id in test_graphs
-                splits["test"].append(idx)
+        train_indices = [
+            i for i, gid in enumerate(graph_ids)
+            if gid in train_graphs
+        ]
+        val_indices = [
+            i for i, gid in enumerate(graph_ids)
+            if gid in val_graphs
+        ]
+        test_indices = [
+            i for i, gid in enumerate(graph_ids)
+            if gid in test_graphs
+        ]
 
         return {
-            name: np.asarray(indices, dtype=np.int64)
-            for name, indices in splits.items()
+            "train": train_indices,
+            "val": val_indices,
+            "test": test_indices,
         }
+
