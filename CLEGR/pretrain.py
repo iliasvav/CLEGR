@@ -33,6 +33,12 @@ flags.DEFINE_integer("seed", 0, "Random seed")
 flags.DEFINE_bool("inference_only", False, "Whether to only run inference")
 flags.DEFINE_string("root", "datasets", "Path to dataset root.")
 
+flags.DEFINE_bool(
+    "compact_dataset",
+    False,
+    "Use the compact CLEGR dataset for pretraining.",
+)
+
 FLAGS = flags.FLAGS
 
 
@@ -42,7 +48,14 @@ def main(_argv):
 
     # Load dataset
     # TODO: add a loading mechanism for different datasets
-    dataset = get_dataset(dataset_name=FLAGS.dataset)(root=FLAGS.root)
+    if FLAGS.compact_dataset:
+        if FLAGS.dataset != "clegr-reasoning":
+            raise ValueError("Compact loading is only supported for clegr-reasoning.")
+
+        from src.data.compact_clegr import CompactCLEGRDataset
+        dataset = CompactCLEGRDataset(root=FLAGS.root)
+    else:
+        dataset = get_dataset(dataset_name=FLAGS.dataset)(root=FLAGS.root)
 
     split = dataset.split(seed=FLAGS.seed)
 
@@ -71,9 +84,14 @@ def main(_argv):
 
     else:
         # graph classification
-        train_dataset = dataset[split["train"]]
+        from torch.utils.data import Subset
+
+        train_dataset = Subset(dataset, split["train"])
+        test_dataset = Subset(dataset, split["test"])
+        val_dataset = Subset(dataset, split["val"])
+        """train_dataset = dataset[split["train"]]
         test_dataset = dataset[split["test"]]
-        val_dataset = dataset[split["val"]]
+        val_dataset = dataset[split["val"]]"""
 
     train_loader = DataLoader(train_dataset, batch_size=FLAGS.batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=FLAGS.batch_size, shuffle=False)

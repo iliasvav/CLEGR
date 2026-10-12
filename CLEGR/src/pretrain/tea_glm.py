@@ -57,7 +57,23 @@ class TEAGLMTrainer(GNNTrainer):
         if task_level == "node":
             self.dataset = dataset.graph_data
         else:
-            self.dataset = dataset
+            if hasattr(dataset, "graph_bank"):
+                split = dataset.split(seed=self.FLAGS.seed)
+                train_graph_ids = {
+                    dataset.qa_records[i]["graph_id"]
+                    for i in split["train"]
+                }
+                self.dataset = [
+                    Data(
+                        x=graph["x"],
+                        edge_index=graph["edge_index"],
+                    )
+                    for graph_id, graph in dataset.graph_bank.items()
+                    if graph_id in train_graph_ids
+                ]
+                assert len(self.dataset) == 300
+            else:
+                self.dataset = dataset
 
         if task_level == "graph":
             for i in range(len(self.dataset)):
