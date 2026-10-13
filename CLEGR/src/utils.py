@@ -184,6 +184,12 @@ def initialize_model(lr: float, graph_data=None, use_lora=False) -> pl.Lightning
         )
 
     glm = get_glm(method=FLAGS.method)(**glm_kwargs)
+    if FLAGS.method == "tea-glm" and use_lora:
+        glm.llm_generator.config.use_cache = False
+        glm.llm_generator.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        logging.info("Enabled gradient checkpointing for TEA-GLM")
 
     # Freeze LLM parameters.
     for name, param in glm.llm.named_parameters():
