@@ -885,7 +885,13 @@ def main(argv):
 
     # Load dataset
     try:
-        dataset = load_dataset(FLAGS.root)
+        if FLAGS.compact_dataset:
+            if FLAGS.dataset != "clegr-reasoning":
+                raise ValueError("Compact dataset is supported only for CLEGR.")
+            from src.data.compact_clegr import CompactCLEGRDataset
+            dataset = CompactCLEGRDataset(root=FLAGS.root)
+        else:
+            dataset = load_dataset(FLAGS.root)
     except Exception:
         logging.exception("Failed to load dataset")
         raise
@@ -993,9 +999,11 @@ def main(argv):
 
     # Initialize model
     # Pass use_lora flag into initializer if supported
+
+    graph_data = getattr(dataset, "graph_data", None)
     model = initialize_model(
         FLAGS.lr,
-        graph_data=dataset.graph_data,
+        graph_data=graph_data,
         use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
     )
 
@@ -1017,7 +1025,7 @@ def main(argv):
                 f"{FLAGS.save_dir}/{FLAGS.method}/projector_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}.ckpt",
                 model=model.model,
                 lr=FLAGS.lr,
-                graph_data=dataset.graph_data,
+                graph_data=graph_data,
                 scheduler_step_size=FLAGS.scheduler_step_size,
                 scheduler_gamma=FLAGS.scheduler_gamma,
             )
@@ -1068,7 +1076,7 @@ def main(argv):
                 model.model,
                 eval_loader,
                 evaluator,
-                graph_data=dataset.graph_data,
+                graph_data=graph_data,
                 output_path=output_csv_path,
             )
         elif FLAGS.eval_mode == "label_scoring":
@@ -1078,7 +1086,7 @@ def main(argv):
                 eval_loader,
                 evaluator,
                 candidate_labels,
-                graph_data=dataset.graph_data,
+                graph_data=graph_data,
                 output_path=output_csv_path,
             )
         else:

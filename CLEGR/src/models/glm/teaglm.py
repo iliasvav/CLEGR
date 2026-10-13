@@ -43,8 +43,11 @@ class TEA_GLM(BaseGLM):
         with open(f"{pretrain_path}_model_params.json", "r") as f:
             param_dict = json.load(f)
 
+        if pretrain_path is not None and "clegr" in pretrain_path.lower():
+            param_dict["task_level"] = "graph_classification"
+        else:
+            param_dict.setdefault("task_level", "node_classification")
         gnn = GraphSAGE(**param_dict).to(llm.device)
-        # load state dict
 
         state_dict = torch.load(
             f"{pretrain_path}_model.pth", weights_only=False
@@ -67,6 +70,12 @@ class TEA_GLM(BaseGLM):
 
     def encode_graph(self, data):
         x = self.gnn(data.x, data.edge_index, batch=data.batch)
+        if self.gnn.task_level == "graph_classification":
+            expected_graphs = int(data.batch.max().item()) + 1
+            assert x.size(0) == expected_graphs, (
+                f"Expected {expected_graphs} graph embeddings, "
+                f"but got {x.size(0)}."
+            )
         if self.shuffle_graph_tokens:
             generator = torch.Generator(device="cpu")
             generator.manual_seed(self.shuffle_seed)
