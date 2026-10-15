@@ -110,11 +110,15 @@ class TEA_GLM(BaseGLM):
             x = self.encode_graph(graph_data)
         else:
             x = self.encode_graph(data)
+        if not torch.isfinite(x).all():
+            raise RuntimeError("Non-finite GNN embeddings")
 
         # filter based on node_id
         if node_id is not None:
             x = x[node_id]
         x = self.projector(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError("Non-finite projector outputs")
         # print(x.shape)
         xs = [hi.squeeze(0) for hi in x.split(1, dim=0)]
         # print(xs)
@@ -162,11 +166,21 @@ class TEA_GLM(BaseGLM):
             answer_logits = base_model.lm_head(answer_hidden)
             answer_targets = label_input_ids[:, -max_answer_len:]
 
+            def check_finite(name, tensor):
+                if not torch.isfinite(tensor).all():
+                    raise RuntimeError(
+                        f"Non-finite values detected in {name}: "
+                        f"NaNs={torch.isnan(tensor).sum().item()}, "
+                        f"Infs={torch.isinf(tensor).sum().item()}"
+                    )
+            check_finite("answer_hidden", answer_hidden)
+            check_finite("answer_logits", answer_logits)
             loss = F.cross_entropy(
                 answer_logits.float().reshape(-1, answer_logits.size(-1)),
                 answer_targets.reshape(-1),
                 ignore_index=-100,
             )
+            check_finite("loss", loss)
 
         return loss
 
@@ -262,6 +276,14 @@ class TEA_GLM_LightningModule(pl.LightningModule):
         loss = self(batch)
         self.log("train_loss", loss)
         return loss
+
+    def on_after_backward(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                if not torch.isfinite(param.grad).all():
+                    raise RuntimeError(
+                        f"Non-finite gradient in {name}"
+                    )
 
     def validation_step(self, batch, batch_idx):
         loss = self(batch)
