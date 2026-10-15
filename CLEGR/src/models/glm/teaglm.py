@@ -5,6 +5,7 @@ import torch
 import lightning as pl
 
 from torch_geometric.data import Batch, Data
+import torch.nn.functional as F
 
 from src.modifiers import Modifier
 from src.models.glm.base import BaseGLM
@@ -134,7 +135,7 @@ class TEA_GLM(BaseGLM):
             label_input_ids,
         ) = self.llm._get_embeds(data.question, con, xs, data.label)
 
-        with self.llm.autocast_context:
+        """with self.llm.autocast_context:
             outputs = self.llm_generator(
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
@@ -142,7 +143,32 @@ class TEA_GLM(BaseGLM):
                 labels=label_input_ids,
             )
 
-        return outputs.loss
+        return outputs.loss"""
+
+        answer_lengths = (label_input_ids != -100).sum(dim=1)
+        max_answer_len = int(answer_lengths.max().item())
+        assert max_answer_len > 0, "No supervised answer tokens found."
+        base_model = self.llm_generator.get_base_model()
+
+        with self.llm.autocast_context:
+            hidden_states = base_model.model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                use_cache=False,
+                return_dict=True,
+            ).last_hidden_state
+
+            answer_hidden = hidden_states[:, -(max_answer_len + 1):-1, :]
+            answer_logits = base_model.lm_head(answer_hidden)
+            answer_targets = label_input_ids[:, -max_answer_len:]
+
+            loss = F.cross_entropy(
+                answer_logits.float().reshape(-1, answer_logits.size(-1)),
+                answer_targets.reshape(-1),
+                ignore_index=-100,
+            )
+
+        return loss
 
     @torch.no_grad()
     def inference(
