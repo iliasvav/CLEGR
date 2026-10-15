@@ -15,6 +15,8 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.strategies import DDPStrategy
 import json
 import statistics
+from pathlib import Path
+import re
 
 # Import project modules
 from src.data.evaluators import get_evaluator, DatasetEvaluator
@@ -127,6 +129,33 @@ flags.DEFINE_integer("shuffle_graph_seed", 42, "Random seed used for graph-token
 flags.DEFINE_bool("compact_dataset", False, "Use the compact CLEGR dataset for training and evaluation.")
 flags.DEFINE_integer("recovery_every_n_steps",500,"Save a recovery checkpoint every N optimizer steps.",)
 flags.DEFINE_string("resume_from",None,"Path to a Lightning recovery checkpoint.",)
+
+class KeepLatestRecoveryCheckpoints(pl.Callback):
+    def __init__(self, recovery_dir, keep=2):
+        super().__init__()
+        self.recovery_dir = Path(recovery_dir)
+        self.keep = keep
+
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx
+    ):
+        if not trainer.is_global_zero:
+            return
+        if not self.recovery_dir.exists():
+            return
+        checkpoints = []
+        for path in self.recovery_dir.glob("recovery-step-*.ckpt"):
+            match = re.fullmatch(
+                r"recovery-step-(\d+)(?:-v\d+)?\.ckpt",
+                path.name,
+            )
+            if match:
+                checkpoints.append(
+                    (int(match.group(1)), path)
+                )
+        checkpoints.sort(key=lambda item: item[0], reverse=True)
+        for _, path in checkpoints[self.keep:]:
+            path.unlink()
 
 def get_candidate_labels(dataset):
     labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
@@ -699,12 +728,13 @@ def train_with_lightning(
         filename=f"projector_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}",
         monitor="val_loss",
     )
+    recovery_dir = os.path.join(
+        FLAGS.save_dir,
+        FLAGS.method,
+        "recovery",
+    )
     recovery_callback = ModelCheckpoint(
-        dirpath=os.path.join(
-            FLAGS.save_dir,
-            FLAGS.method,
-            "recovery",
-        ),
+        dirpath=recovery_dir,
         filename="recovery-step-{step:06d}",
         every_n_train_steps=FLAGS.recovery_every_n_steps,
         save_top_k=-1,
@@ -727,7 +757,9 @@ def train_with_lightning(
         raise FileExistsError(f"Checkpoint exists: {ckpt_path}")
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    callbacks = [checkpoint_callback, recovery_callback, lr_monitor]
+    callbacks = [checkpoint_callback, lr_monitor]
+    callbacks.append(recovery_callback)
+    callbacks.append(KeepLatestRecoveryCheckpoints(recovery_dir, keep=2))
     if FLAGS.eval_each_epoch:
         callbacks.append(EvalEachEpochCallback(val_loader, FLAGS.dataset))
 
@@ -762,7 +794,7 @@ def train_with_lightning(
     logging.info("Training with Lightning completed.")
 
     # Save LoRA adapters if used
-    if getattr(model.model, 'use_lora', False):
+    if trainer.is_global_zero and getattr(model.model, "use_lora", False):
         lora_dir = os.path.join(
             FLAGS.save_dir,
             FLAGS.method,
