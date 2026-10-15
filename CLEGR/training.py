@@ -74,6 +74,8 @@ flags.DEFINE_string(
 flags.DEFINE_string("save_dir", "models", "Directory to save the model checkpoints.")
 flags.DEFINE_bool("evaluate", False, "Whether to only evaluate the model.")
 flags.DEFINE_integer("max_samples", -1, "Maximum number of samples to test on.")
+flags.DEFINE_integer("max_train_steps", -1,"Maximum optimizer steps for a short training run; -1 means unlimited.")
+flags.DEFINE_integer("max_val_batches", -1,"Maximum validation batches per GPU; -1 means full validation.")
 
 flags.DEFINE_bool(
     "use_lora",
@@ -726,6 +728,9 @@ def train_with_lightning(
     # Trainer with gradient clipping
     trainer = pl.Trainer(
         max_epochs=epochs,
+        limit_train_batches=(FLAGS.max_train_steps if FLAGS.max_train_steps > 0 else 1.0),
+        limit_val_batches=(FLAGS.max_val_batches if FLAGS.max_val_batches > 0 else 1.0),
+        num_sanity_val_steps=0 if FLAGS.max_train_steps > 0 else 2,
         log_every_n_steps=10,
         accelerator=FLAGS.accelerator,
         devices=FLAGS.num_gpus,
