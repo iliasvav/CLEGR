@@ -285,6 +285,14 @@ class TEA_GLM_LightningModule(pl.LightningModule):
                         f"Non-finite gradient in {name}"
                     )
 
+    def on_train_batch_start(self, batch, batch_idx):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if not torch.isfinite(param).all():
+                    raise RuntimeError(
+                        f"Non-finite parameter at batch {batch_idx}: {name}"
+                    )
+
     def validation_step(self, batch, batch_idx):
         loss = self(batch)
         self.log("val_loss", loss, batch_size=1, sync_dist=True)
