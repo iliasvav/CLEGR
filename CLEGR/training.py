@@ -130,21 +130,50 @@ flags.DEFINE_bool("compact_dataset", False, "Use the compact CLEGR dataset for t
 flags.DEFINE_integer("recovery_every_n_steps",500,"Save a recovery checkpoint every N optimizer steps.",)
 flags.DEFINE_string("resume_from",None,"Path to a Lightning recovery checkpoint.",)
 
-class KeepLatestRecoveryCheckpoints(pl.Callback):
-    def __init__(self, recovery_dir, keep=2):
-        super().__init__()
-        self.recovery_dir = Path(recovery_dir)
+
+class SafeRecoveryCheckpoint(ModelCheckpoint):
+    def __init__(self, *args, keep=2, **kwargs):
+        super().__init__(*args, **kwargs)
         self.keep = keep
 
-    def on_train_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx
-    ):
+    def _check_finite(self, trainer):
+        model = trainer.lightning_module
+
+        # Check trainable weights.
+        for name, param in model.named_parameters():
+            if param.requires_grad and not torch.isfinite(param).all():
+                raise RuntimeError(
+                    f"Unsafe checkpoint: non-finite parameter {name}"
+                )
+
+        # Check optimizer state, including AdamW momentum tensors.
+        for optimizer in trainer.optimizers:
+            for state in optimizer.state.values():
+                for value in state.values():
+                    if (
+                        torch.is_tensor(value)
+                        and (value.is_floating_point() or value.is_complex())
+                        and not torch.isfinite(value).all()
+                    ):
+                        raise RuntimeError(
+                            "Unsafe checkpoint: non-finite optimizer state"
+                        )
+
+    def _save_checkpoint(self, trainer, filepath):
+        # Validate before writing anything.
+        self._check_finite(trainer)
+
+        # Let Lightning save the complete checkpoint.
+        super()._save_checkpoint(trainer, filepath)
+
+        # Only rank zero manages files.
         if not trainer.is_global_zero:
             return
-        if not self.recovery_dir.exists():
-            return
+
+        directory = Path(self.dirpath)
         checkpoints = []
-        for path in self.recovery_dir.glob("recovery-step-*.ckpt"):
+
+        for path in directory.glob("recovery-step-*.ckpt"):
             match = re.fullmatch(
                 r"recovery-step-(\d+)(?:-v\d+)?\.ckpt",
                 path.name,
@@ -153,9 +182,15 @@ class KeepLatestRecoveryCheckpoints(pl.Callback):
                 checkpoints.append(
                     (int(match.group(1)), path)
                 )
-        checkpoints.sort(key=lambda item: item[0], reverse=True)
+
+        checkpoints.sort(
+            key=lambda item: (item[0], item[1].stat().st_mtime),
+            reverse=True,
+        )
+
         for _, path in checkpoints[self.keep:]:
             path.unlink()
+
 
 def get_candidate_labels(dataset):
     labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
@@ -733,7 +768,7 @@ def train_with_lightning(
         FLAGS.method,
         "recovery",
     )
-    recovery_callback = ModelCheckpoint(
+    recovery_callback = SafeRecoveryCheckpoint(
         dirpath=recovery_dir,
         filename="recovery-step-{step:06d}",
         every_n_train_steps=FLAGS.recovery_every_n_steps,
@@ -742,6 +777,7 @@ def train_with_lightning(
         save_last=True,
         save_weights_only=False,
         auto_insert_metric_name=False,
+        keep=2,
     )
 
     ckpt_path = os.path.join(
@@ -759,7 +795,6 @@ def train_with_lightning(
     lr_monitor = LearningRateMonitor(logging_interval="step")
     callbacks = [checkpoint_callback, lr_monitor]
     callbacks.append(recovery_callback)
-    callbacks.append(KeepLatestRecoveryCheckpoints(recovery_dir, keep=2))
     if FLAGS.eval_each_epoch:
         callbacks.append(EvalEachEpochCallback(val_loader, FLAGS.dataset))
 
