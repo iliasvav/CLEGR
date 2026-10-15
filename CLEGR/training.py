@@ -707,7 +707,7 @@ def train_with_lightning(
         ),
         filename="recovery-step-{step:06d}",
         every_n_train_steps=FLAGS.recovery_every_n_steps,
-        save_top_k=2,
+        save_top_k=-1,
         monitor=None,
         save_last=True,
         save_weights_only=False,
