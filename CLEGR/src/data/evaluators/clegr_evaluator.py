@@ -291,11 +291,14 @@ class CLEGREvaluator(DatasetEvaluator):
 
         return metrics
 
-    def log_raw(self):
+    def log_raw(self, output_path="logs/output.csv"):
         import os
         import csv
-        os.makedirs("logs", exist_ok=True)
-        with open("logs/output.csv", "w", newline="", encoding="utf-8") as f:
+        os.makedirs(
+            os.path.dirname(output_path) or ".",
+            exist_ok=True
+        )
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
                 "Prediction",
@@ -306,7 +309,6 @@ class CLEGREvaluator(DatasetEvaluator):
                 "Scope",
                 "Subgroups",
             ])
-
             for r in self.records:
                 writer.writerow([
                     r["pred_raw"],
