@@ -125,6 +125,8 @@ flags.DEFINE_bool("shuffle_graph_tokens", False, "Shuffle node-level GNN represe
 flags.DEFINE_integer("shuffle_graph_seed", 42, "Random seed used for graph-token shuffling.",)
 
 flags.DEFINE_bool("compact_dataset", False, "Use the compact CLEGR dataset for training and evaluation.")
+flags.DEFINE_integer("recovery_every_n_steps",500,"Save a recovery checkpoint every N optimizer steps.",)
+flags.DEFINE_string("resume_from",None,"Path to a Lightning recovery checkpoint.",)
 
 def get_candidate_labels(dataset):
     labels = sorted(list({str(dataset[i].label).strip() for i in range(len(dataset))}))
@@ -697,20 +699,35 @@ def train_with_lightning(
         filename=f"projector_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}",
         monitor="val_loss",
     )
+    recovery_callback = ModelCheckpoint(
+        dirpath=os.path.join(
+            FLAGS.save_dir,
+            FLAGS.method,
+            "recovery",
+        ),
+        filename="recovery-step-{step:06d}",
+        every_n_train_steps=FLAGS.recovery_every_n_steps,
+        save_top_k=2,
+        monitor=None,
+        save_last=True,
+        save_weights_only=False,
+        auto_insert_metric_name=False,
+    )
 
     ckpt_path = os.path.join(
         FLAGS.save_dir,
         FLAGS.method,
         f"projector_{FLAGS.llm_model_name}_{FLAGS.dataset}_seed_{FLAGS.seed}.ckpt",
     )
-    if os.path.exists(ckpt_path):
+    if os.path.exists(ckpt_path) and FLAGS.resume_from is None:
         logging.error(
-            "Checkpoint already exists at %s; exiting to avoid overwrite.", ckpt_path
+            "Checkpoint already exists at %s; exiting to avoid overwrite.",
+            ckpt_path
         )
         raise FileExistsError(f"Checkpoint exists: {ckpt_path}")
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    callbacks = [checkpoint_callback, lr_monitor]
+    callbacks = [checkpoint_callback, recovery_callback, lr_monitor]
     if FLAGS.eval_each_epoch:
         callbacks.append(EvalEachEpochCallback(val_loader, FLAGS.dataset))
 
@@ -741,7 +758,7 @@ def train_with_lightning(
         gradient_clip_algorithm="norm",
     )
 
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=FLAGS.resume_from,)
     logging.info("Training with Lightning completed.")
 
     # Save LoRA adapters if used
