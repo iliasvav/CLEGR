@@ -214,14 +214,24 @@ class TEA_GLM(BaseGLM):
         inputs_embeds, attention_mask, _ = self.llm._get_embeds(
             question, con, xs, modifier=modifier
         )
-        with self.llm.autocast_context:
+        """with self.llm.autocast_context:
             outputs = self.generate(
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
                 max_length=max_out_tokens,
                 return_dict_in_generate=True,
             )
-        return self.llm.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        return self.llm.tokenizer.batch_decode(outputs, skip_special_tokens=True)"""
+        with self.llm.autocast_context:
+            outputs = self.generate_batched(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                max_length=max_out_tokens,
+            )
+        return self.llm.tokenizer.batch_decode(
+            outputs,
+            skip_special_tokens=True,
+        )
 
 
 class TEA_GLM_LightningModule(pl.LightningModule):

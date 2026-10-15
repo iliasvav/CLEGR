@@ -393,6 +393,21 @@ class BaseGLM(torch.nn.Module):
         # else:
         return self._in_house_generate(inputs_embeds, attention_mask, max_length)
 
+    @torch.no_grad()
+    def generate_batched(self, inputs_embeds, attention_mask, max_length):
+        eos_ids = sorted(self.GENERATION_EOS_TOKEN_IDS)
+        kwargs = {
+            "inputs_embeds": inputs_embeds,
+            "attention_mask": attention_mask,
+            "max_new_tokens": max_length,
+            "use_cache": True,
+            "do_sample": False,
+            "pad_token_id": self.llm.tokenizer.pad_token_id,
+        }
+        if eos_ids:
+            kwargs["eos_token_id"] = eos_ids
+        return self.llm_generator.generate(**kwargs)
+
     def prepare_projector(self):
         r"""
         Prepares the projector for the GNN.
