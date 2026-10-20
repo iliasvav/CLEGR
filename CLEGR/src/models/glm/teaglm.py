@@ -280,7 +280,7 @@ class NumericalDebugger:
                         f"NaNs={nan_count} Infs={inf_count}"
                     )
 
-                if step % self.log_every == 0 and rank == 0:
+                if step % self.log_every == 0:
                     # Only print selected important modules.
                     if (
                         name == "projector"
@@ -289,7 +289,8 @@ class NumericalDebugger:
                     ):
                         f = t.float()
                         print(
-                            f"[NUMERIC] step={step} {direction} {name} "
+                            f"[NUMERIC] rank={rank} step={step} "
+                            f"{direction} {name} "
                             f"dtype={t.dtype} "
                             f"absmax={f.abs().max().item():.5g} "
                             f"mean={f.mean().item():.5g} "
@@ -323,12 +324,17 @@ class NumericalDebugger:
 
         # Instrument important boundaries without registering hooks
         # on every 4-bit quantized linear layer.
+        
+        registered = []
+
         for name, module in model.named_modules():
             if (
                 name == "projector"
                 or name.endswith(".norm")
-                or ".layers." in name
-                and name.rsplit(".", 1)[-1].isdigit()
+                or (
+                    ".layers." in name
+                    and name.rsplit(".", 1)[-1].isdigit()
+                )
             ):
                 self.handles.append(
                     module.register_forward_hook(make_forward_hook(name))
@@ -336,6 +342,22 @@ class NumericalDebugger:
                 self.handles.append(
                     module.register_full_backward_hook(make_backward_hook(name))
                 )
+                registered.append(name)
+
+        print(
+            f"[NUMERIC SETUP] rank={self.get_rank()} "
+            f"registered {len(registered)} modules",
+            flush=True,
+        )
+
+        for name in registered:
+            print(f"[NUMERIC SETUP] {name}", flush=True)
+
+        if not registered:
+            raise RuntimeError(
+                "NumericalDebugger registered ZERO modules!"
+            )
+
 
     def remove(self):
         for handle in self.handles:
@@ -381,10 +403,11 @@ class TEA_GLM_LightningModule(pl.LightningModule):
                 model=self.model,
                 get_step=lambda: self.global_step,
                 get_rank=lambda: self.global_rank,
-                log_every=25,
+                log_every=1,
             )
             print(
-                f"[NUMERIC] Debugger installed on rank {self.global_rank}",
+                f"[DEBUG STATUS] rank={self.global_rank} "
+                f"debug_numerics={self.debug_numerics}",
                 flush=True,
             )
 
