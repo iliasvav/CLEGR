@@ -129,7 +129,7 @@ flags.DEFINE_integer("shuffle_graph_seed", 42, "Random seed used for graph-token
 flags.DEFINE_bool("compact_dataset", False, "Use the compact CLEGR dataset for training and evaluation.")
 flags.DEFINE_integer("recovery_every_n_steps",500,"Save a recovery checkpoint every N optimizer steps.",)
 flags.DEFINE_string("resume_from",None,"Path to a Lightning recovery checkpoint.",)
-
+flags.DEFINE_bool("debug_numerics",False,"Enable numerical debugging of activations and gradients.",)
 
 class SafeRecoveryCheckpoint(ModelCheckpoint):
     def __init__(self, *args, keep=2, **kwargs):
@@ -825,6 +825,7 @@ def train_with_lightning(
         gradient_clip_algorithm="norm",
         detect_anomaly=False,
         precision="16-mixed",
+        max_steps=(7400 if FLAGS.debug_numerics else -1),
     )
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=FLAGS.resume_from,)
@@ -1119,6 +1120,11 @@ def main(argv):
                 graph_data=graph_data,
                 scheduler_step_size=FLAGS.scheduler_step_size,
                 scheduler_gamma=FLAGS.scheduler_gamma,
+                **(
+                    {"debug_numerics": FLAGS.debug_numerics}
+                    if FLAGS.method == "tea-glm"
+                    else {}
+                ),
             )
             # Load LoRA adapters if used
             if FLAGS.use_lora:

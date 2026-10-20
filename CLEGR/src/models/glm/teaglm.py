@@ -248,6 +248,101 @@ class TEA_GLM(BaseGLM):
         )"""
 
 
+
+class NumericalDebugger:
+    """Check module outputs and incoming gradients for NaN/Inf."""
+
+    def __init__(self, model, get_step, get_rank, log_every=25):
+        self.handles = []
+        self.get_step = get_step
+        self.get_rank = get_rank
+        self.log_every = log_every
+
+        def inspect(name, tensor, direction):
+            if not isinstance(tensor, torch.Tensor):
+                return
+            if not tensor.is_floating_point():
+                return
+
+            with torch.no_grad():
+                t = tensor.detach()
+                finite = torch.isfinite(t).all().item()
+                step = self.get_step()
+                rank = self.get_rank()
+
+                if not finite:
+                    nan_count = torch.isnan(t).sum().item()
+                    inf_count = torch.isinf(t).sum().item()
+                    raise RuntimeError(
+                        f"[NUMERIC FAILURE] step={step} rank={rank} "
+                        f"direction={direction} module={name} "
+                        f"dtype={t.dtype} shape={tuple(t.shape)} "
+                        f"NaNs={nan_count} Infs={inf_count}"
+                    )
+
+                if step % self.log_every == 0 and rank == 0:
+                    # Only print selected important modules.
+                    if (
+                        name == "projector"
+                        or name.endswith(".norm")
+                        or name.endswith(".layers.0")
+                    ):
+                        f = t.float()
+                        print(
+                            f"[NUMERIC] step={step} {direction} {name} "
+                            f"dtype={t.dtype} "
+                            f"absmax={f.abs().max().item():.5g} "
+                            f"mean={f.mean().item():.5g} "
+                            f"std={f.std(unbiased=False).item():.5g}",
+                            flush=True,
+                        )
+
+        def tensors(obj):
+            if isinstance(obj, torch.Tensor):
+                yield obj
+            elif isinstance(obj, (tuple, list)):
+                for item in obj:
+                    yield from tensors(item)
+            elif isinstance(obj, dict):
+                for item in obj.values():
+                    yield from tensors(item)
+
+        def make_forward_hook(name):
+            def hook(module, inputs, output):
+                for i, t in enumerate(tensors(output)):
+                    inspect(f"{name}.output[{i}]", t, "forward")
+            return hook
+
+        def make_backward_hook(name):
+            def hook(module, grad_input, grad_output):
+                for i, t in enumerate(tensors(grad_input)):
+                    inspect(f"{name}.grad_input[{i}]", t, "backward")
+                for i, t in enumerate(tensors(grad_output)):
+                    inspect(f"{name}.grad_output[{i}]", t, "backward")
+            return hook
+
+        # Instrument important boundaries without registering hooks
+        # on every 4-bit quantized linear layer.
+        for name, module in model.named_modules():
+            if (
+                name == "projector"
+                or name.endswith(".norm")
+                or ".layers." in name
+                and name.rsplit(".", 1)[-1].isdigit()
+            ):
+                self.handles.append(
+                    module.register_forward_hook(make_forward_hook(name))
+                )
+                self.handles.append(
+                    module.register_full_backward_hook(make_backward_hook(name))
+                )
+
+    def remove(self):
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+
+
 class TEA_GLM_LightningModule(pl.LightningModule):
     def __init__(
         self,
@@ -256,6 +351,7 @@ class TEA_GLM_LightningModule(pl.LightningModule):
         scheduler_step_size=10,
         scheduler_gamma=0.1,
         graph_data=None,
+        debug_numerics=False,
     ):
         super().__init__()
         # Save hyperparameters for logging and checkpointing
@@ -268,6 +364,8 @@ class TEA_GLM_LightningModule(pl.LightningModule):
         self.graph_data = (
             graph_data.to(self.model.llm.device) if graph_data is not None else None
         )
+        self.debug_numerics = debug_numerics
+        self.numerical_debugger = None
 
     def forward(self, batch):
         return self.model(batch, self.graph_data)
@@ -276,6 +374,25 @@ class TEA_GLM_LightningModule(pl.LightningModule):
         loss = self(batch)
         self.log("train_loss", loss)
         return loss
+
+    def on_fit_start(self):
+        if self.debug_numerics:
+            self.numerical_debugger = NumericalDebugger(
+                model=self.model,
+                get_step=lambda: self.global_step,
+                get_rank=lambda: self.global_rank,
+                log_every=25,
+            )
+            print(
+                f"[NUMERIC] Debugger installed on rank {self.global_rank}",
+                flush=True,
+            )
+
+    def on_fit_end(self):
+        if self.numerical_debugger is not None:
+            self.numerical_debugger.remove()
+            self.numerical_debugger = None
+
 
     """def on_after_backward(self):
         for name, param in self.model.named_parameters():
