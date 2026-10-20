@@ -1104,6 +1104,8 @@ def main(argv):
         graph_data=graph_data,
         use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
     )
+    if FLAGS.method == "tea-glm":
+        model.debug_numerics = FLAGS.debug_numerics
 
     model.model.context_mode = FLAGS.context_mode
     model.model.context_perturbation = FLAGS.context_perturbation

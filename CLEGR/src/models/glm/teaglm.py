@@ -279,14 +279,13 @@ class NumericalDebugger:
                         f"dtype={t.dtype} shape={tuple(t.shape)} "
                         f"NaNs={nan_count} Infs={inf_count}"
                     )
-
                 if step % self.log_every == 0:
-                    # Only print selected important modules.
                     if (
-                        name == "projector"
-                        or name.endswith(".norm")
-                        or name.endswith(".layers.0")
+                        name.startswith("projector.")
+                        or name.startswith("llm.llm.model.layers.0.")
+                        or name.startswith("llm.llm.model.norm.")
                     ):
+
                         f = t.float()
                         print(
                             f"[NUMERIC] rank={rank} step={step} "
