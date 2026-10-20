@@ -277,13 +277,13 @@ class TEA_GLM_LightningModule(pl.LightningModule):
         self.log("train_loss", loss)
         return loss
 
-    def on_after_backward(self):
+    """def on_after_backward(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad and param.grad is not None:
                 if not torch.isfinite(param.grad).all():
                     raise RuntimeError(
                         f"Non-finite gradient in {name}"
-                    )
+                    )"""
 
     def on_train_batch_start(self, batch, batch_idx):
         for name, param in self.model.named_parameters():

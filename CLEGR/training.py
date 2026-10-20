@@ -823,7 +823,8 @@ def train_with_lightning(
         logger=wandb_logger,
         gradient_clip_val=FLAGS.gradient_clip_val,
         gradient_clip_algorithm="norm",
-        detect_anomaly=True,
+        detect_anomaly=False,
+        precision="16-mixed",
     )
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=FLAGS.resume_from,)
