@@ -273,12 +273,16 @@ class NumericalDebugger:
                 if not finite:
                     nan_count = torch.isnan(t).sum().item()
                     inf_count = torch.isinf(t).sum().item()
-                    raise RuntimeError(
+                    message = (
                         f"[NUMERIC FAILURE] step={step} rank={rank} "
                         f"direction={direction} module={name} "
                         f"dtype={t.dtype} shape={tuple(t.shape)} "
                         f"NaNs={nan_count} Infs={inf_count}"
                     )
+                    if direction == "backward":
+                        print(message + " [AMP may skip this step]", flush=True)
+                        return
+                    raise RuntimeError(message)
                 if step % self.log_every == 0:
                     if (
                         name.startswith("projector.")
@@ -402,7 +406,7 @@ class TEA_GLM_LightningModule(pl.LightningModule):
                 model=self.model,
                 get_step=lambda: self.global_step,
                 get_rank=lambda: self.global_rank,
-                log_every=1,
+                log_every=25,
             )
             print(
                 f"[DEBUG STATUS] rank={self.global_rank} "
