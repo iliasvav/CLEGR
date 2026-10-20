@@ -825,7 +825,13 @@ def train_with_lightning(
         gradient_clip_algorithm="norm",
         detect_anomaly=False,
         precision="16-mixed",
-        max_steps=(7400 if FLAGS.debug_numerics else -1),
+    )
+
+    print(
+        f"[DEBUG VERIFY] flag={FLAGS.debug_numerics}, "
+        f"module={type(model).__name__}, "
+        f"module_debug={getattr(model, 'debug_numerics', 'MISSING')}",
+        flush=True,
     )
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=FLAGS.resume_from,)
