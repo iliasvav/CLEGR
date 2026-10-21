@@ -824,7 +824,7 @@ def train_with_lightning(
         gradient_clip_val=FLAGS.gradient_clip_val,
         gradient_clip_algorithm="norm",
         detect_anomaly=False,
-        precision="16-mixed",
+        precision="32-true"
     )
 
     print(

@@ -46,7 +46,8 @@ class LLM(torch.nn.Module):
         q_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type='nf4',
-            bnb_4bit_compute_dtype=torch.float16,
+            #bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         kwargs["quantization_config"] = q_config
         kwargs.pop("config", None)
@@ -110,7 +111,8 @@ class LLM(torch.nn.Module):
         self.word_embedding = self.llm.model.get_input_embeddings()
 
         self.device = self.llm.device
-        self.autocast_context = torch.amp.autocast(device_type="cuda", dtype=dtype)
+        #self.autocast_context = torch.amp.autocast(device_type="cuda", dtype=dtype)
+        self.autocast_context = nullcontext()
 
     def _build_prompt_format(self) -> tuple[str, str, str]:
         """
