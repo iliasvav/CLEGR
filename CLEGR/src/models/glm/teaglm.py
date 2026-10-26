@@ -263,6 +263,22 @@ class TEA_GLM(BaseGLM):
             # IMPORTANT: Apply the real projector only once
             x = self.projector(x)
 
+            # TEMPORARY DIAGNOSTIC: rescale projected graph tokens
+            import torch.nn.functional as F
+
+            original_norm = x.float().norm(dim=-1).mean().item()
+
+            # Normalize each graph token to approximately the scale
+            # of the Qwen text embeddings.
+            x = F.normalize(x.float(), p=2, dim=-1).to(x.dtype)
+
+            new_norm = x.float().norm(dim=-1).mean().item()
+
+            print("\n=== GRAPH TOKEN RESCALING ===")
+            print("Original graph token norm:", original_norm)
+            print("Rescaled graph token norm:", new_norm)
+            print("=============================\n")
+
 
 
             if isinstance(node_id, list):
