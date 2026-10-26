@@ -194,6 +194,9 @@ class TEA_GLM(BaseGLM):
         no_graph_token: bool = False,
     ):
         self.llm.eval()
+        # TEMPORARY ABLATION: disable graph tokens
+        no_graph_token = True
+        print("[ABLATION] Graph tokens DISABLED")
 
         data = data.to(self.llm.device)
 
