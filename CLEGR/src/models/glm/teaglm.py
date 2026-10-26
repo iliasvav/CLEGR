@@ -214,73 +214,41 @@ class TEA_GLM(BaseGLM):
                 x = self.encode_graph(data)
 
             
+            # === GRAPH IDENTITY DIAGNOSTIC ===
+            import hashlib
+
+            def fingerprint(t):
+                t = t.detach().contiguous().cpu()
+                return hashlib.sha256(t.numpy().tobytes()).hexdigest()[:16]
+
+            source = graph_data if graph_data is not None else data
+
+            print("\n=== GRAPH IDENTITY DEBUG ===")
+            print("Questions:", list(question))
+            print("node_id:", node_id)
+            print("Graph source:", "graph_data" if graph_data is not None else "data")
+            print("Number of nodes:", source.num_nodes)
+            print("Number of edges:", source.edge_index.shape[1])
+
+            if hasattr(source, "batch") and source.batch is not None:
+                print("Number of graphs:", int(source.batch.max().item()) + 1)
+
+            print("Node feature fingerprint:", fingerprint(source.x))
+            print("Edge index fingerprint:", fingerprint(source.edge_index))
+
+            print("GNN output shape before node selection:", tuple(x.shape))
+            print("GNN output fingerprint before selection:", fingerprint(x))
+
             if node_id is not None:
                 x = x[node_id]
 
-            # === TEMPORARY PROJECTOR COMPARISON ===
-            import torch.nn as nn
+            print("Selected GNN output shape:", tuple(x.shape))
+            print("Selected GNN output fingerprint:", fingerprint(x))
 
-            with torch.no_grad():
-                gnn_x = x.detach()
-
-                # 1. Existing trained projector
-                trained_output = self.projector(gnn_x)
-
-                # 2. Freshly initialized projector
-                fresh_projector = nn.Linear(
-                    self.projector[0].in_features,
-                    self.projector[0].out_features,
-                    device=gnn_x.device,
-                    dtype=gnn_x.dtype,
-                )
-
-                fresh_output = fresh_projector(gnn_x)
-                fresh_tokens = fresh_output.reshape(
-                    -1,
-                    self.n_gnn_toks,
-                    self.projector_out_channels,
-                )
-
-                print("\n=== CORRECT PROJECTOR COMPARISON ===")
-                print("GNN input shape:", tuple(gnn_x.shape))
-                print("GNN input norm:",
-                    gnn_x.float().norm(dim=-1).mean().item())
-
-                print("Trained projector output shape:",
-                    tuple(trained_output.shape))
-                print("Trained projector norm per token:",
-                    trained_output.float().norm(dim=-1).mean().item())
-
-                print("Fresh projector output shape:",
-                    tuple(fresh_tokens.shape))
-                print("Fresh projector norm per token:",
-                    fresh_tokens.float().norm(dim=-1).mean().item())
-
-                print("Trained projector weight std:",
-                    self.projector[0].weight.float().std().item())
-                print("Fresh projector weight std:",
-                    fresh_projector.weight.float().std().item())
-
-                print("====================================\n")
-
-            # IMPORTANT: Apply the real projector only once
             x = self.projector(x)
 
-            # TEMPORARY DIAGNOSTIC: rescale projected graph tokens
-            import torch.nn.functional as F
-
-            original_norm = x.float().norm(dim=-1).mean().item()
-
-            # Normalize each graph token to approximately the scale
-            # of the Qwen text embeddings.
-            x = F.normalize(x.float(), p=2, dim=-1).to(x.dtype)
-
-            new_norm = x.float().norm(dim=-1).mean().item()
-
-            print("\n=== GRAPH TOKEN RESCALING ===")
-            print("Original graph token norm:", original_norm)
-            print("Rescaled graph token norm:", new_norm)
-            print("=============================\n")
+            print("Projected output fingerprint:", fingerprint(x))
+            print("============================\n")
 
 
 
