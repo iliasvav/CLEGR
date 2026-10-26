@@ -346,24 +346,6 @@ class BaseGLM(torch.nn.Module):
         next_token_logits = outputs.logits[:, -1, :]
         next_token_id = next_token_logits.argmax(dim=-1, keepdim=True)
 
-        # TEMPORARY DIAGNOSTIC
-        probs = torch.softmax(next_token_logits.float(), dim=-1)
-        top_probs, top_ids = torch.topk(probs, k=10, dim=-1)
-
-        print("\n=== FIRST TOKEN DEBUG ===")
-        print("Generator training mode:", self.llm_generator.training)
-        print("Prompt length:", inputs_embeds.shape[1])
-        print("Attention mask sum:", attention_mask.sum().item())
-        print("Logits finite:", torch.isfinite(next_token_logits).all().item())
-
-        for token_id, prob in zip(top_ids[0].tolist(), top_probs[0].tolist()):
-            token_text = self.llm.tokenizer.decode(
-                [token_id], skip_special_tokens=False
-            )
-            print(f"{token_id:6d} | {prob:.6f} | {repr(token_text)}")
-
-        print("=========================\n")
-
         generated_tokens = []
 
         for step in range(max_length):

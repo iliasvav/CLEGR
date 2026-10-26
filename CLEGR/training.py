@@ -44,7 +44,7 @@ flags.DEFINE_string("dataset", "clegr-reasoning", "The dataset to use.")
 flags.DEFINE_integer("num_gpus", 1, "Number of GPUs for training.")
 flags.DEFINE_integer("seed", 0, "The random seed.")
 flags.DEFINE_integer("batch_size", 32, "Batch size for the training DataLoader.")
-flags.DEFINE_float("lr", 1e-3, "Learning rate for the optimizer.")
+flags.DEFINE_float("lr", 1e-4, "Learning rate for the optimizer.")
 flags.DEFINE_integer("epochs", 50, "Number of epochs for training with Lightning.")
 flags.DEFINE_integer(
     "manual_epochs", 5, "Number of epochs for manual training (if not using Lightning)."
@@ -888,24 +888,6 @@ def evaluate(
                 break
 
             data = data.to(model.llm.device)
-            # === TEMPORARY LOSS EQUIVALENCE TEST ===
-            if i == 0:
-                print("\n=== SUPERVISED FORWARD TEST ===")
-                print("Question:", data.question)
-                print("Reference label:", data.label)
-
-                model.eval()
-
-                with torch.no_grad():
-                    diagnostic_loss = model(
-                        data,
-                        graph_data=graph_data,
-                    )
-
-                print("Returned custom loss:", diagnostic_loss.item())
-                print("================================\n")
-
-                return {"loss_diagnostic": float(diagnostic_loss.item())}
 
             out_seq = model.inference(
                 data,

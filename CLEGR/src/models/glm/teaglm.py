@@ -181,36 +181,6 @@ class TEA_GLM(BaseGLM):
                 ignore_index=-100,
             )
             check_finite("loss", loss)
-            # === LOSS ALIGNMENT DIAGNOSTIC ===
-            with torch.no_grad():
-                # Standard causal LM convention:
-                # logits at position t predict labels at position t+1.
-                shifted_labels = label_input_ids[:, 1:].contiguous()
-                shifted_hidden = hidden_states[:, :-1, :]
-
-                supervised_mask = shifted_labels != -100
-
-                reference_hidden = shifted_hidden[supervised_mask]
-                reference_targets = shifted_labels[supervised_mask]
-
-                reference_logits = base_model.lm_head(reference_hidden)
-
-                reference_loss = F.cross_entropy(
-                    reference_logits.float(),
-                    reference_targets,
-                )
-
-                print("\n=== LOSS ALIGNMENT DEBUG ===")
-                print("Batch size:", label_input_ids.shape[0])
-                print("Sequence length:", label_input_ids.shape[1])
-                print("Supervised positions:", supervised_mask.sum().item())
-                print("Custom loss:", loss.item())
-                print("Reference loss:", reference_loss.item())
-                print("Absolute difference:",
-                    abs(loss.item() - reference_loss.item()))
-                print("First supervised target IDs:",
-                    reference_targets[:10].tolist())
-                print("============================\n")
 
         return loss
 
