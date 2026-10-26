@@ -210,15 +210,20 @@ class TEA_GLM(BaseGLM):
             else:
                 x = self.encode_graph(data)
 
+            
             if node_id is not None:
                 x = x[node_id]
-            x = self.projector(x)
+
+            # === TEMPORARY PROJECTOR COMPARISON ===
             import torch.nn as nn
+
             with torch.no_grad():
                 gnn_x = x.detach()
 
+                # 1. Existing trained projector
                 trained_output = self.projector(gnn_x)
 
+                # 2. Freshly initialized projector
                 fresh_projector = nn.Linear(
                     self.projector[0].in_features,
                     self.projector[0].out_features,
@@ -227,24 +232,38 @@ class TEA_GLM(BaseGLM):
                 )
 
                 fresh_output = fresh_projector(gnn_x)
+                fresh_tokens = fresh_output.reshape(
+                    -1,
+                    self.n_gnn_toks,
+                    self.projector_out_channels,
+                )
 
-                print("\n=== PROJECTOR COMPARISON ===")
+                print("\n=== CORRECT PROJECTOR COMPARISON ===")
+                print("GNN input shape:", tuple(gnn_x.shape))
                 print("GNN input norm:",
                     gnn_x.float().norm(dim=-1).mean().item())
 
-                print("Trained projector output norm:",
+                print("Trained projector output shape:",
+                    tuple(trained_output.shape))
+                print("Trained projector norm per token:",
                     trained_output.float().norm(dim=-1).mean().item())
 
-                print("Fresh projector output norm:",
-                    fresh_output.float().norm(dim=-1).mean().item())
+                print("Fresh projector output shape:",
+                    tuple(fresh_tokens.shape))
+                print("Fresh projector norm per token:",
+                    fresh_tokens.float().norm(dim=-1).mean().item())
 
                 print("Trained projector weight std:",
                     self.projector[0].weight.float().std().item())
-
                 print("Fresh projector weight std:",
                     fresh_projector.weight.float().std().item())
 
-                print("============================\n")
+                print("====================================\n")
+
+            # IMPORTANT: Apply the real projector only once
+            x = self.projector(x)
+
+
 
             if isinstance(node_id, list):
                 x = x.view(1, -1, x.shape[-1])
