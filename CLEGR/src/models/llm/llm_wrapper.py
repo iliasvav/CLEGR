@@ -39,7 +39,7 @@ class LLM(torch.nn.Module):
         self.model_name = model_name
 
         from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
-        kwargs = dict(revision='main')
+        kwargs = dict(revision='main',dtype=torch.float32,)
         config = AutoConfig.from_pretrained(model_name)
         if not hasattr(config, 'pad_token_id') or config.pad_token_id is None:
             config.pad_token_id = config.eos_token_id
@@ -59,6 +59,8 @@ class LLM(torch.nn.Module):
             model_name,
             **kwargs,
         )
+        print("LM head dtype:", self.llm.lm_head.weight.dtype)
+        print("Embedding dtype:", self.llm.get_input_embeddings().weight.dtype)
 
         """kwargs = dict(revision='main')
         kwargs['low_cpu_mem_usage'] = True
