@@ -210,42 +210,11 @@ class TEA_GLM(BaseGLM):
             else:
                 x = self.encode_graph(data)
 
-            
-            # === GRAPH IDENTITY DIAGNOSTIC ===
-            import hashlib
-
-            def fingerprint(t):
-                t = t.detach().contiguous().cpu()
-                return hashlib.sha256(t.numpy().tobytes()).hexdigest()[:16]
-
-            source = graph_data if graph_data is not None else data
-
-            print("\n=== GRAPH IDENTITY DEBUG ===")
-            print("Questions:", list(question))
-            print("node_id:", node_id)
-            print("Graph source:", "graph_data" if graph_data is not None else "data")
-            print("Number of nodes:", source.num_nodes)
-            print("Number of edges:", source.edge_index.shape[1])
-
-            if hasattr(source, "batch") and source.batch is not None:
-                print("Number of graphs:", int(source.batch.max().item()) + 1)
-
-            print("Node feature fingerprint:", fingerprint(source.x))
-            print("Edge index fingerprint:", fingerprint(source.edge_index))
-
-            print("GNN output shape before node selection:", tuple(x.shape))
-            print("GNN output fingerprint before selection:", fingerprint(x))
-
             if node_id is not None:
                 x = x[node_id]
 
-            print("Selected GNN output shape:", tuple(x.shape))
-            print("Selected GNN output fingerprint:", fingerprint(x))
-
             x = self.projector(x)
 
-            print("Projected output fingerprint:", fingerprint(x))
-            print("============================\n")
 
 
 
@@ -265,24 +234,35 @@ class TEA_GLM(BaseGLM):
         inputs_embeds, attention_mask, _ = self.llm._get_embeds(
             question, con, xs, modifier=modifier
         )
-        with self.llm.autocast_context:
+        # === TEMPORARY LORA ABLATION ===
+        generator = self.llm_generator
+
+        assert hasattr(generator, "disable_adapter"), (
+            "LoRA ablation requires a PEFT model."
+        )
+
+        print("\n=== LORA ABLATION ===")
+        print("Generator class:", type(generator).__name__)
+        print("Active adapters:", getattr(generator, "active_adapters", None))
+
+        with generator.disable_adapter():
+            print("[ABLATION] LoRA adapters DISABLED")
+
+            with self.llm.autocast_context:
+                outputs = self.generate(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    max_length=max_out_tokens,
+                    return_dict_in_generate=True,
+                )
+        """with self.llm.autocast_context:
             outputs = self.generate(
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
                 max_length=max_out_tokens,
                 return_dict_in_generate=True,
-            )
+            )"""
         return self.llm.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        """with self.llm.autocast_context:
-            outputs = self.generate_batched(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                max_length=max_out_tokens,
-            )
-        return self.llm.tokenizer.batch_decode(
-            outputs,
-            skip_special_tokens=True,
-        )"""
 
 
 
