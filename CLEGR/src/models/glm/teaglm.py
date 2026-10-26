@@ -212,21 +212,38 @@ class TEA_GLM(BaseGLM):
 
             if node_id is not None:
                 x = x[node_id]
-            # Diagnostic: before projector
-            with torch.no_grad():
-                print("\n=== GRAPH PIPELINE DEBUG ===")
-                print("GNN output shape:", tuple(x.shape))
-                print("GNN output dtype:", x.dtype)
-                print("GNN output norm:", x.float().norm(dim=-1).mean().item())
-                print("GNN output abs max:", x.float().abs().max().item())
-                print("GNN output finite:", torch.isfinite(x).all().item())
             x = self.projector(x)
-            # Diagnostic: after projector
+            import torch.nn as nn
             with torch.no_grad():
-                print("Projector output shape:", tuple(x.shape))
-                print("Projector output norm:", x.float().norm(dim=-1).mean().item())
-                print("Projector output abs max:", x.float().abs().max().item())
-                print("Projector output finite:", torch.isfinite(x).all().item())
+                gnn_x = x.detach()
+
+                trained_output = self.projector(gnn_x)
+
+                fresh_projector = nn.Linear(
+                    self.projector[0].in_features,
+                    self.projector[0].out_features,
+                    device=gnn_x.device,
+                    dtype=gnn_x.dtype,
+                )
+
+                fresh_output = fresh_projector(gnn_x)
+
+                print("\n=== PROJECTOR COMPARISON ===")
+                print("GNN input norm:",
+                    gnn_x.float().norm(dim=-1).mean().item())
+
+                print("Trained projector output norm:",
+                    trained_output.float().norm(dim=-1).mean().item())
+
+                print("Fresh projector output norm:",
+                    fresh_output.float().norm(dim=-1).mean().item())
+
+                print("Trained projector weight std:",
+                    self.projector[0].weight.float().std().item())
+
+                print("Fresh projector weight std:",
+                    fresh_projector.weight.float().std().item())
+
                 print("============================\n")
 
             if isinstance(node_id, list):
