@@ -181,6 +181,36 @@ class TEA_GLM(BaseGLM):
                 ignore_index=-100,
             )
             check_finite("loss", loss)
+            # === LOSS ALIGNMENT DIAGNOSTIC ===
+            with torch.no_grad():
+                # Standard causal LM convention:
+                # logits at position t predict labels at position t+1.
+                shifted_labels = label_input_ids[:, 1:].contiguous()
+                shifted_hidden = hidden_states[:, :-1, :]
+
+                supervised_mask = shifted_labels != -100
+
+                reference_hidden = shifted_hidden[supervised_mask]
+                reference_targets = shifted_labels[supervised_mask]
+
+                reference_logits = base_model.lm_head(reference_hidden)
+
+                reference_loss = F.cross_entropy(
+                    reference_logits.float(),
+                    reference_targets,
+                )
+
+                print("\n=== LOSS ALIGNMENT DEBUG ===")
+                print("Batch size:", label_input_ids.shape[0])
+                print("Sequence length:", label_input_ids.shape[1])
+                print("Supervised positions:", supervised_mask.sum().item())
+                print("Custom loss:", loss.item())
+                print("Reference loss:", reference_loss.item())
+                print("Absolute difference:",
+                    abs(loss.item() - reference_loss.item()))
+                print("First supervised target IDs:",
+                    reference_targets[:10].tolist())
+                print("============================\n")
 
         return loss
 
@@ -234,34 +264,13 @@ class TEA_GLM(BaseGLM):
         inputs_embeds, attention_mask, _ = self.llm._get_embeds(
             question, con, xs, modifier=modifier
         )
-        # === TEMPORARY LORA ABLATION ===
-        generator = self.llm_generator
-
-        assert hasattr(generator, "disable_adapter"), (
-            "LoRA ablation requires a PEFT model."
-        )
-
-        print("\n=== LORA ABLATION ===")
-        print("Generator class:", type(generator).__name__)
-        print("Active adapters:", getattr(generator, "active_adapters", None))
-
-        with generator.disable_adapter():
-            print("[ABLATION] LoRA adapters DISABLED")
-
-            with self.llm.autocast_context:
-                outputs = self.generate(
-                    inputs_embeds=inputs_embeds,
-                    attention_mask=attention_mask,
-                    max_length=max_out_tokens,
-                    return_dict_in_generate=True,
-                )
-        """with self.llm.autocast_context:
+        with self.llm.autocast_context:
             outputs = self.generate(
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
                 max_length=max_out_tokens,
                 return_dict_in_generate=True,
-            )"""
+            )
         return self.llm.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
 
