@@ -888,6 +888,24 @@ def evaluate(
                 break
 
             data = data.to(model.llm.device)
+            # === TEMPORARY LOSS EQUIVALENCE TEST ===
+            if i == 0:
+                print("\n=== SUPERVISED FORWARD TEST ===")
+                print("Question:", data.question)
+                print("Reference label:", data.label)
+
+                model.eval()
+
+                with torch.no_grad():
+                    diagnostic_loss = model(
+                        data,
+                        graph_data=graph_data,
+                    )
+
+                print("Returned custom loss:", diagnostic_loss.item())
+                print("================================\n")
+
+                return {"loss_diagnostic": float(diagnostic_loss.item())}
 
             out_seq = model.inference(
                 data,
