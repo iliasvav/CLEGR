@@ -212,6 +212,27 @@ class TEA_GLM(BaseGLM):
             if node_id is not None:
                 x = x[node_id]
             x = self.projector(x)
+            # TEMPORARY DIAGNOSTIC
+            with torch.no_grad():
+                graph_norms = x.float().norm(dim=-1)
+
+                token_weights = self.llm.word_embedding.weight
+                sample_token_ids = torch.randint(
+                    low=0,
+                    high=token_weights.shape[0],
+                    size=(100,),
+                    device=token_weights.device,
+                )
+                text_norms = token_weights[sample_token_ids].float().norm(dim=-1)
+
+                print("\n=== EMBEDDING SCALE DEBUG ===")
+                print("Graph token norm mean:", graph_norms.mean().item())
+                print("Graph token norm min:", graph_norms.min().item())
+                print("Graph token norm max:", graph_norms.max().item())
+                print("Text token norm mean:", text_norms.mean().item())
+                print("Text token norm min:", text_norms.min().item())
+                print("Text token norm max:", text_norms.max().item())
+                print("=============================\n")
             if isinstance(node_id, list):
                 x = x.view(1, -1, x.shape[-1])
             xs = [hi.squeeze(0) for hi in x.split(1, dim=0)]
