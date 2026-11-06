@@ -382,7 +382,7 @@ class BaseGLM(torch.nn.Module):
             return torch.empty((inputs_embeds.size(0), 0), dtype=torch.long, device=inputs_embeds.device)
         return torch.cat(generated_tokens, dim=1)
 
-    def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
+    #def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
         # if "llama" in self.llm.model_name.lower():
         #     return self.llm_generator.generate(
         #         inputs_embeds=inputs_embeds,
@@ -391,7 +391,16 @@ class BaseGLM(torch.nn.Module):
         #         **kwargs,
         #     )
         # else:
-        return self._in_house_generate(inputs_embeds, attention_mask, max_length)
+        #return self._in_house_generate(inputs_embeds, attention_mask, max_length)
+
+    
+    def generate(self, inputs_embeds, attention_mask, max_length, **kwargs):
+        return self.generate_batched(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            max_length=max_length,
+        )
+
 
     @torch.no_grad()
     def generate_batched(self, inputs_embeds, attention_mask, max_length):
