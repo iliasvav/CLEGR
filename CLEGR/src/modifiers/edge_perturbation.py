@@ -1,7 +1,7 @@
 
 import torch
 from torch.utils.data import Dataset
-
+import hashlib
 
 def drop_edges_undirected(data, drop_prob, seed=42):
     """Drop undirected edge pairs while preserving edge attributes."""
@@ -63,9 +63,20 @@ class EdgeDropDataset(Dataset):
     def __getitem__(self, idx):
         data = self.dataset[idx]
 
-        # Different deterministic perturbation per sample.
+        # Generate a stable seed using the graph ID.
+        graph_id = str(data.graph_id)
+
+        digest = hashlib.sha256(
+            f"{self.seed}:{graph_id}".encode("utf-8")
+        ).digest()
+
+        graph_seed = int.from_bytes(
+            digest[:8], byteorder="big"
+        ) % (2**63 - 1)
+
         return drop_edges_undirected(
             data,
             drop_prob=self.drop_prob,
-            seed=self.seed + int(idx),
+            seed=graph_seed,
         )
+
