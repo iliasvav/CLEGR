@@ -1172,47 +1172,66 @@ def main(argv):
                     else {}
                 ),
             )
-            # Verify that the projector and LoRA weights were restored.
-            checkpoint_path = (
+                        
+            # Verify checkpoint restoration
+            ckpt_path = (
                 f"{FLAGS.save_dir}/{FLAGS.method}/"
                 f"projector_{FLAGS.llm_model_name}_"
                 f"{FLAGS.dataset}_seed_{FLAGS.seed}.ckpt"
             )
 
-            saved_state = torch.load(
-                checkpoint_path,
+            saved = torch.load(
+                ckpt_path,
                 map_location="cpu",
                 weights_only=False,
             )["state_dict"]
 
-            loaded_state = lm_module.state_dict()
+            loaded = lm_module.state_dict()
 
             missing = []
-            mismatched = []
+            different = []
 
-            for key, saved_tensor in saved_state.items():
-                if key not in loaded_state:
-                    missing.append(key)
-                    continue
+            for name, expected in saved.items():
+                actual = loaded.get(name)
 
-                loaded_tensor = loaded_state[key].detach().cpu()
+                if actual is None:
+                    missing.append(name)
+                elif not torch.equal(
+                    expected.cpu(),
+                    actual.detach().cpu()
+                ):
+                    different.append(name)
 
-                if not torch.equal(saved_tensor.cpu(), loaded_tensor):
-                    mismatched.append(key)
+            print("\n===== WEIGHT VERIFICATION =====")
+            print("Saved tensors:", len(saved))
+            print("Missing tensors:", len(missing))
+            print("Different tensors:", len(different))
+            print("Missing examples:", missing[:5])
+            print("Different examples:", different[:5])
 
-            print("CHECKPOINT VERIFICATION")
-            print("Saved tensors:", len(saved_state))
-            print("Missing keys:", len(missing))
-            print("Mismatched tensors:", len(mismatched))
-            print("First missing keys:", missing[:5])
-            print("First mismatched keys:", mismatched[:5])
+            if missing or different:
+                raise RuntimeError("Model weights did not load correctly!")
 
-            if missing or mismatched:
+            # Check that LoRA is active in the generation model.
+            generator = lm_module.model.llm_generator
+
+            print("\n===== GENERATION MODEL =====")
+            print("Generator class:", type(generator))
+            print(
+                "Active adapters:",
+                getattr(generator, "active_adapters", None)
+            )
+
+            if not isinstance(generator, PeftModel):
                 raise RuntimeError(
-                    "Checkpoint weights were not restored exactly."
+                    "Generation model is not a PEFT model!"
                 )
 
-            print("SUCCESS: All saved checkpoint weights restored!")
+            if hasattr(generator, "active_adapters"):
+                assert generator.active_adapters, "No active LoRA adapter!"
+
+            print("\nCheckpoint restoration checks passed.")
+
 
             # Load LoRA adapters if used
             """if FLAGS.use_lora:
