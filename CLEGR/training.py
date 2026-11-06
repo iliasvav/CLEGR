@@ -28,6 +28,7 @@ from src.utils import (
     create_dataloaders,
     initialize_model,
 )
+from src.modifiers.edge_perturbation import EdgeDropDataset
 
 # LoRA imports
 from peft import PeftModel
@@ -631,6 +632,7 @@ def build_output_csv_path():
     parts = [
         FLAGS.dataset,
         FLAGS.llm_model_name,
+        f"modelseed-{FLAGS.seed}",
         f"eval-{FLAGS.eval_mode}",
         f"split-{FLAGS.eval_split}",
         f"context-{FLAGS.context_mode}",
@@ -1091,6 +1093,41 @@ def main(argv):
 
     # Split and create loaders
     train_dataset, val_dataset, test_dataset = split_dataset(dataset, FLAGS.seed)
+    if FLAGS.edge_drop_prob > 0:
+        if not FLAGS.evaluate:
+            raise ValueError(
+                "Edge perturbations are supported only during evaluation."
+            )
+        if FLAGS.edge_drop_mode == "none":
+            raise ValueError(
+                "Specify --edge_drop_mode=random or degree."
+            )
+        if FLAGS.dataset == "clegr-reasoning":
+            if FLAGS.edge_drop_mode != "random":
+                raise ValueError(
+                    "CLEGR currently supports random edge deletion only."
+                )
+            # Perturb the actual requested evaluation split.
+            if FLAGS.eval_split == "train":
+                train_dataset = EdgeDropDataset(
+                    train_dataset, FLAGS.edge_drop_prob, FLAGS.edge_drop_seed
+                )
+            elif FLAGS.eval_split == "val":
+                val_dataset = EdgeDropDataset(
+                    val_dataset, FLAGS.edge_drop_prob, FLAGS.edge_drop_seed
+                )
+            elif FLAGS.eval_split == "test":
+                test_dataset = EdgeDropDataset(
+                    test_dataset, FLAGS.edge_drop_prob, FLAGS.edge_drop_seed
+                )
+            else:
+                raise ValueError(f"Unknown eval_split: {FLAGS.eval_split}")
+            logging.info(
+                "CLEGR edge deletion: p=%.2f, seed=%d, split=%s",
+                FLAGS.edge_drop_prob,
+                FLAGS.edge_drop_seed,
+                FLAGS.eval_split,
+            )
     train_loader, val_loader, test_loader = create_dataloaders(
         train_dataset, val_dataset, test_dataset, FLAGS.batch_size, FLAGS.num_workers
     )
