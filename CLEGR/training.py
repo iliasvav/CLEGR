@@ -1139,7 +1139,8 @@ def main(argv):
     model = initialize_model(
         FLAGS.lr,
         graph_data=graph_data,
-        use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
+        #use_lora=(FLAGS.use_lora and not FLAGS.evaluate),
+        use_lora=FLAGS.use_lora,
     )
     if FLAGS.method == "tea-glm":
         model.debug_numerics = FLAGS.debug_numerics
@@ -1171,8 +1172,50 @@ def main(argv):
                     else {}
                 ),
             )
+            # Verify that the projector and LoRA weights were restored.
+            checkpoint_path = (
+                f"{FLAGS.save_dir}/{FLAGS.method}/"
+                f"projector_{FLAGS.llm_model_name}_"
+                f"{FLAGS.dataset}_seed_{FLAGS.seed}.ckpt"
+            )
+
+            saved_state = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )["state_dict"]
+
+            loaded_state = lm_module.state_dict()
+
+            missing = []
+            mismatched = []
+
+            for key, saved_tensor in saved_state.items():
+                if key not in loaded_state:
+                    missing.append(key)
+                    continue
+
+                loaded_tensor = loaded_state[key].detach().cpu()
+
+                if not torch.equal(saved_tensor.cpu(), loaded_tensor):
+                    mismatched.append(key)
+
+            print("CHECKPOINT VERIFICATION")
+            print("Saved tensors:", len(saved_state))
+            print("Missing keys:", len(missing))
+            print("Mismatched tensors:", len(mismatched))
+            print("First missing keys:", missing[:5])
+            print("First mismatched keys:", mismatched[:5])
+
+            if missing or mismatched:
+                raise RuntimeError(
+                    "Checkpoint weights were not restored exactly."
+                )
+
+            print("SUCCESS: All saved checkpoint weights restored!")
+
             # Load LoRA adapters if used
-            if FLAGS.use_lora:
+            """if FLAGS.use_lora:
                 lora_dir = os.path.join(
                     FLAGS.save_dir,
                     FLAGS.method,
@@ -1186,7 +1229,7 @@ def main(argv):
                 )
                 logging.info("Loaded LoRA adapters from %s", lora_dir)
                 logging.info("Loaded LoRA model class: %s", type(lm_module.model.llm_generator))
-                logging.info("Active PEFT adapters: %s", getattr(lm_module.model.llm_generator, "active_adapters", None))
+                logging.info("Active PEFT adapters: %s", getattr(lm_module.model.llm_generator, "active_adapters", None))"""
             model = lm_module
             model.model.context_mode = FLAGS.context_mode
             model.model.context_perturbation = FLAGS.context_perturbation
