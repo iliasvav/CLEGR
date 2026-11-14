@@ -325,7 +325,6 @@ class CLEGRFactsDataset(BaseDataset):
         }
 
     def split(self, seed, split_ratio=(0.6, 0.2, 0.2)):
-        # Delegate to BaseDataset.split so the permutation is seed-dependent
         return self.split_by_graph(seed, split_ratio)
 
     def embed_sentences(self, sentences):
